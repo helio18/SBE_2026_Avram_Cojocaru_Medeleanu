@@ -168,6 +168,24 @@ public class GeneratorConfig {
                 benchmarkThreadCounts);
     }
 
+    public GeneratorConfig withCompanies(List<String> newCompanies) {
+        return new GeneratorConfig(
+                publicationCount,
+                subscriptionCount,
+                baseSeed,
+                subscriptionFieldPercentages,
+                companyEqualityPercentage,
+                newCompanies,
+                dates,
+                valueMin,
+                valueMax,
+                dropMin,
+                dropMax,
+                variationMin,
+                variationMax,
+                benchmarkThreadCounts);
+    }
+
     public GeneratorConfig withCompanyEqualityPercentage(int newCompanyEqualityPercentage) {
         return new GeneratorConfig(
                 publicationCount,

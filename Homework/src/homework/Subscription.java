@@ -15,6 +15,15 @@ public class Subscription {
         return conditions;
     }
 
+    public boolean matches(Publication publication) {
+        for (SubscriptionCondition condition : conditions) {
+            if (!condition.matches(publication)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public String toFileLine(int index) {
         StringBuilder builder = new StringBuilder();
         builder.append("Subscription ").append(index).append(": {");

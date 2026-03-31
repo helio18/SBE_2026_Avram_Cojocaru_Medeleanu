@@ -6,6 +6,7 @@ import java.util.List;
 
 public class CommandLineOptions {
 
+    private String mode = "project";
     private Integer publicationCount;
     private Integer subscriptionCount;
     private Integer companyFrequency;
@@ -14,6 +15,11 @@ public class CommandLineOptions {
     private Integer variationFrequency;
     private Integer dateFrequency;
     private Integer companyEqualityPercentage;
+    private Integer brokerCount;
+    private Integer publisherCount;
+    private Integer subscriberCount;
+    private Integer evaluationSeconds;
+    private Integer publishIntervalMillis;
     private Long seed;
     private int[] threadCounts;
     private Path outputDir = Path.of("output");
@@ -37,6 +43,9 @@ public class CommandLineOptions {
             String value = parts[1];
 
             switch (name) {
+                case "--mode":
+                    options.mode = value;
+                    break;
                 case "--publications":
                     options.publicationCount = Integer.valueOf(parsePositiveInt(name, value));
                     break;
@@ -60,6 +69,21 @@ public class CommandLineOptions {
                     break;
                 case "--company-equals":
                     options.companyEqualityPercentage = Integer.valueOf(parsePercentage(name, value));
+                    break;
+                case "--broker-count":
+                    options.brokerCount = Integer.valueOf(parsePositiveInt(name, value));
+                    break;
+                case "--publisher-count":
+                    options.publisherCount = Integer.valueOf(parsePositiveInt(name, value));
+                    break;
+                case "--subscriber-count":
+                    options.subscriberCount = Integer.valueOf(parsePositiveInt(name, value));
+                    break;
+                case "--evaluation-seconds":
+                    options.evaluationSeconds = Integer.valueOf(parsePositiveInt(name, value));
+                    break;
+                case "--publish-interval-ms":
+                    options.publishIntervalMillis = Integer.valueOf(parsePositiveInt(name, value));
                     break;
                 case "--seed":
                     options.seed = Long.valueOf(parseLong(name, value));
@@ -115,6 +139,41 @@ public class CommandLineOptions {
         return config;
     }
 
+    public ProjectConfig applyTo(ProjectConfig baseConfig) {
+        ProjectConfig config = baseConfig;
+
+        if (publicationCount != null) {
+            config = config.withPublicationPoolSize(publicationCount.intValue());
+        }
+        if (subscriptionCount != null) {
+            config = config.withSimpleSubscriptionCount(subscriptionCount.intValue());
+        }
+        if (brokerCount != null) {
+            config = config.withBrokerCount(brokerCount.intValue());
+        }
+        if (publisherCount != null) {
+            config = config.withPublisherCount(publisherCount.intValue());
+        }
+        if (subscriberCount != null) {
+            config = config.withSubscriberCount(subscriberCount.intValue());
+        }
+        if (evaluationSeconds != null) {
+            config = config.withEvaluationSeconds(evaluationSeconds.intValue());
+        }
+        if (publishIntervalMillis != null) {
+            config = config.withPublishIntervalMillis(publishIntervalMillis.intValue());
+        }
+        if (threadCounts != null && threadCounts.length > 0) {
+            config = config.withGenerationThreadCount(threadCounts[0]);
+        }
+
+        return config;
+    }
+
+    public String getMode() {
+        return mode;
+    }
+
     public Path getOutputDir() {
         return outputDir;
     }
@@ -131,6 +190,7 @@ public class CommandLineOptions {
                 "",
                 "Optiuni:",
                 "  --help",
+                "  --mode=project|generator",
                 "  --publications=<numar>",
                 "  --subscriptions=<numar>",
                 "  --threads=<lista separata prin virgula, ex. 1,4>",
@@ -140,14 +200,19 @@ public class CommandLineOptions {
                 "  --variation-frequency=<0..100>",
                 "  --date-frequency=<0..100>",
                 "  --company-equals=<0..100>",
+                "  --broker-count=<numar>",
+                "  --publisher-count=<numar>",
+                "  --subscriber-count=<numar>",
+                "  --evaluation-seconds=<numar>",
+                "  --publish-interval-ms=<numar>",
                 "  --seed=<numar>",
                 "  --output=<director>",
                 "",
                 "Exemple:",
                 "  java -cp bin homework.HomeworkApp",
-                "  java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1,4",
-                "  java -cp bin homework.HomeworkApp --company-frequency=100 --value-frequency=100 --drop-frequency=0 --variation-frequency=0 --date-frequency=0",
-                "  java -cp bin homework.HomeworkApp --publications=5000 --subscriptions=5000 --company-equals=85 --output=output/test-run");
+                "  java -cp bin homework.HomeworkApp --mode=project --evaluation-seconds=15 --output=output/project-demo",
+                "  java -cp bin homework.HomeworkApp --mode=generator --publications=1000 --subscriptions=1000 --threads=1,4",
+                "  java -cp bin homework.HomeworkApp --mode=generator --company-frequency=100 --value-frequency=100 --drop-frequency=0 --variation-frequency=0 --date-frequency=0");
     }
 
     private static int parsePositiveInt(String name, String value) {

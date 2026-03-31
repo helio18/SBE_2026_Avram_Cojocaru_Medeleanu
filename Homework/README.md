@@ -1,82 +1,63 @@
-# Homework - Generator de publicatii si subscriptii
+# Homework - Sistem publish/subscribe content-based
 
-Acest proiect implementeaza integral cerinta temei in Java, in VS Code.
-Generatorul produce seturi de publicatii si subscriptii, salveaza rezultatele in fisiere text,
-ruleaza benchmark cu mai multe niveluri de paralelizare si scrie automat acest raport.
+Acest proiect extinde generatorul initial de date intr-o simulare completa de sistem pub/sub.
+Implementarea acopera partea non-bonus din cerinta: publisheri, brokeri, subscriberi,
+rutare intre brokeri si evaluare pentru doua scenarii de matching.
 
-## Decizii de implementare
+## Arhitectura implementata
 
-- paralelizare: `threads`
-- limbaj: `Java 21`
-- structura publicatie: fixa, cu campurile `company`, `value`, `drop`, `variation`, `date`
-- distributia campurilor din subscriptii este controlata exact pe baza unor numere tinta, nu doar random
-- pentru campul `company`, operatorul `=` este controlat separat si respecta pragul minim cerut
-- fiecare subscriptie contine cel putin un camp
+- `2` publisheri care emit un flux continuu de publicatii generate din generatorul initial
+- `3` brokeri intr-un overlay de tip inel; fiecare broker stocheaza doar o parte din subscriptii
+- `3` subscriberi simulati care se conecteaza aleatoriu la brokeri pentru a inregistra subscriptii
+- subscriptiile aceluiasi subscriber sunt distribuite balansat pe brokeri printr-un mecanism round-robin
+- fiecare publicatie trece prin tot overlay-ul, fiecare broker facand matching doar pe subscriptiile locale
 
-## Configuratie folosita
+## Configuratia evaluarii
 
-- publicatii generate: `40000`
-- subscriptii generate: `40000`
-- thread-uri testate: `1, 4`
-- frecvente campuri in subscriptii:
-  - company: `90%`
-  - value: `70%`
-  - drop: `55%`
-  - variation: `65%`
-  - date: `40%`
-- prag minim pentru operatorul `=` pe `company`: `70%`
+- subscriptii simple inregistrate per scenariu: `10000`
+- pool de publicatii: `5000`
+- brokeri: `3`
+- publisheri: `2`
+- subscriberi: `3`
+- durata feed-ului continuu: `180` secunde
+- interval intre doua publicatii emise de acelasi publisher: `50` ms
 
-## Benchmark
+## Rezultate scenarii
 
-| Threads | Publicatii ms | Subscriptii ms | Scriere ms | Total ms | Speedup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 45 | 300 | 277 | 622 | 1.00x |
-| 4 | 10 | 96 | 155 | 261 | 2.38x |
+| Scenariu | Egalitate company | Publicatii emise | Livrari reusite | Publicatii potrivite | Latenta medie ms | Matching rate | Hop-uri medii publicatii |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| equals-100 | 100% | 7088 | 3182 | 2710 | 0.3592 | 38.2336% | 3.00 |
+| equals-25 | 25% | 7142 | 21426 | 7142 | 0.0088 | 100.0000% | 3.00 |
 
-## Verificare distributii
+## Interpretare
 
-Valorile de mai jos provin din rularea cu `4` thread-uri.
+- `Livrari reusite` = numarul total de notificari trimise subscriberilor prin reteaua de brokeri
+- `Publicatii potrivite` = numarul de publicatii care au avut cel putin un match
+- `Matching rate` = procentul de publicatii care au avut cel putin un match
+- comparatia intre scenariul `100% =` si `25% =` arata impactul distributiei operatorului `=` asupra matching-ului
 
-| Camp | Tinta | Obtinut |
-| --- | ---: | ---: |
-| company | 90% | 36000 (90.00%) |
-| value | 70% | 28000 (70.00%) |
-| drop | 55% | 22000 (55.00%) |
-| variation | 65% | 26000 (65.00%) |
-| date | 40% | 16000 (40.00%) |
+## Balansare subscriptii pe brokeri
 
-- `company` cu operator `=`: `25200 / 36000` = `70.00%`
+- broker-1: `3334` subscriptii stocate
+- broker-2: `3333` subscriptii stocate
+- broker-3: `3333` subscriptii stocate
+- hop-uri medii la inregistrare: `2.00`
+
+## Fisiere generate
+
+- scenariu `equals-100`:
+  - `output/scenario-equals-100/publication-pool.txt`
+  - `output/scenario-equals-100/simple-subscriptions.txt`
+  - `output/scenario-equals-100/scenario-report.txt`
+- scenariu `equals-25`:
+  - `output/scenario-equals-25/publication-pool.txt`
+  - `output/scenario-equals-25/simple-subscriptions.txt`
+  - `output/scenario-equals-25/scenario-report.txt`
 
 ## Specificatii masina
 
 - CPU: `12th Gen Intel(R) Core(TM) i7-12650H`
 - logical cores: `16`
-- OS: `Linux 6.8.0-101-generic`
+- OS: `Linux 6.8.0-106-generic`
 - Java: `21.0.10`
-- raport generat la: `2026-03-25 11:23:48`
-
-## Fisiere generate
-
-- run `1` thread-uri:
-  - `output/threads-1/publications.txt`
-  - `output/threads-1/subscriptions.txt`
-  - `output/threads-1/summary.txt`
-- run `4` thread-uri:
-  - `output/threads-4/publications.txt`
-  - `output/threads-4/subscriptions.txt`
-  - `output/threads-4/summary.txt`
-
-## Rulare
-
-Din terminal, din folderul `Homework`:
-
-```bash
-find src -name '*.java' -print0 | xargs -0 javac -d bin
-java -cp bin homework.HomeworkApp
-```
-
-Exemplu pentru testare rapida cu parametri custom:
-
-```bash
-java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1,4 --output=output/test-small
-```
+- raport generat la: `2026-03-30 11:58:54`
