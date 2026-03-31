@@ -1,12 +1,126 @@
-Cum testam app:
+Cum testam aplicatia
+
+Toate comenzile de mai jos se ruleaza din folderul Homework.
+
+1. Compilare
 
 find src -name '*.java' -print0 | xargs -0 javac -d bin
+
+2. Verificare help si sintaxa optiunilor
+
 java -cp bin homework.HomeworkApp --help
+
+3. Rulare implicita
+Genereaza setul standard, benchmark pentru 1 si 4 thread-uri si actualizeaza README.md din proiect.
 
 java -cp bin homework.HomeworkApp
 
+4. Test functional mic
+Verifica o rulare rapida, cu fisiere separate in output/test-small.
+
 java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1,4 --output=output/test-small
+sed -n '1,80p' output/test-small/README.md
+sed -n '1,40p' output/test-small/threads-1/summary.txt
+sed -n '1,40p' output/test-small/threads-4/summary.txt
+
+5. Test de margine pentru frecvente 100% si 0%
+Toate subscriptiile trebuie sa aiba company si value, iar celelalte campuri trebuie sa lipseasca.
 
 java -cp bin homework.HomeworkApp --publications=500 --subscriptions=500 --threads=1,2 --company-frequency=100 --value-frequency=100 --drop-frequency=0 --variation-frequency=0 --date-frequency=0 --company-equals=80 --output=output/test-edge
+sed -n '1,40p' output/test-edge/threads-1/summary.txt
+sed -n '1,40p' output/test-edge/threads-2/summary.txt
+sed -n '1,20p' output/test-edge/threads-1/subscriptions.txt
+
+6. Test cu valori din interiorul intervalului
+Foloseste frecvente intermediare, nu doar extremele 0% si 100%.
+
+java -cp bin homework.HomeworkApp --publications=200 --subscriptions=200 --threads=1 --company-frequency=30 --value-frequency=45 --drop-frequency=60 --variation-frequency=75 --date-frequency=90 --company-equals=35 --seed=12345 --output=output/test-midrange
+sed -n '1,40p' output/test-midrange/threads-1/summary.txt
+sed -n '1,20p' output/test-midrange/threads-1/subscriptions.txt
+
+7. Test pentru operatori diferiti
+Verifica explicit cazul in care equality pe company este mica si restul apar ca !=.
+In plus, pentru campurile numerice trebuie sa apara operatorii <, >, <=, >= si =.
+
+java -cp bin homework.HomeworkApp --publications=500 --subscriptions=500 --threads=1 --company-frequency=90 --value-frequency=70 --drop-frequency=55 --variation-frequency=65 --date-frequency=40 --company-equals=20 --seed=12345 --output=output/test-operators
+sed -n '1,40p' output/test-operators/threads-1/summary.txt
+grep -F -m 5 '(company,!=,' output/test-operators/threads-1/subscriptions.txt
+grep -F -m 5 '(value,<,' output/test-operators/threads-1/subscriptions.txt
+grep -F -m 5 '(value,>,' output/test-operators/threads-1/subscriptions.txt
+grep -F -m 5 '(value,<=,' output/test-operators/threads-1/subscriptions.txt
+grep -F -m 5 '(value,>=,' output/test-operators/threads-1/subscriptions.txt
+grep -F -m 5 '(value,=,' output/test-operators/threads-1/subscriptions.txt
+
+8. Test cu suma frecventelor peste 100%
+Tema permite teste cu suma frecventelor >= 100. Acest caz foloseste suma 250%.
+
+java -cp bin homework.HomeworkApp --publications=500 --subscriptions=500 --threads=1 --company-frequency=50 --value-frequency=50 --drop-frequency=50 --variation-frequency=50 --date-frequency=50 --seed=12345 --output=output/test-sum-over-100
+sed -n '1,40p' output/test-sum-over-100/threads-1/summary.txt
+
+9. Test baseline separat, fara paralelizare
+Util pentru masuratori clare doar cu 1 thread.
+
+java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1 --seed=12345 --output=output/test-baseline-1
+sed -n '1,40p' output/test-baseline-1/threads-1/summary.txt
+sed -n '1,120p' output/test-baseline-1/README.md
+
+10. Test workload mic cu multe thread-uri
+Verifica faptul ca logica ramane corecta si pentru factor de paralelism mare raportat la workload.
+
+java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=8 --seed=12345 --output=output/test-threads-8
+sed -n '1,40p' output/test-threads-8/threads-8/summary.txt
+sed -n '1,120p' output/test-threads-8/README.md
+
+11. Test pentru cazuri foarte mici care inainte produceau crash
+Programul nu trebuie sa mai arunce IllegalStateException.
+
+java -cp bin homework.HomeworkApp --publications=1 --subscriptions=1 --threads=1 --company-frequency=20 --value-frequency=20 --drop-frequency=20 --variation-frequency=20 --date-frequency=20 --output=output/test-regression-1
+sed -n '1,40p' output/test-regression-1/threads-1/summary.txt
+
+java -cp bin homework.HomeworkApp --publications=2 --subscriptions=2 --threads=1 --company-frequency=20 --value-frequency=20 --drop-frequency=20 --variation-frequency=20 --date-frequency=20 --output=output/test-regression-2
+sed -n '1,40p' output/test-regression-2/threads-1/summary.txt
+
+12. Test pentru distributii discrete pe set mic
+Arata ca procentele care nu pot fi reprezentate exact sunt raportate ca planned si actual.
+
+java -cp bin homework.HomeworkApp --publications=10 --subscriptions=10 --threads=1 --output=output/test-discrete-small
+sed -n '1,60p' output/test-discrete-small/threads-1/summary.txt
+sed -n '1,120p' output/test-discrete-small/README.md
+
+13. Test de benchmark mai mare
+Verifica scalarea pe mai multe valori de paralelism.
 
 java -cp bin homework.HomeworkApp --publications=100000 --subscriptions=100000 --threads=1,4,8 --output=output/test-benchmark
+sed -n '1,120p' output/test-benchmark/README.md
+
+14. Test de reproductibilitate cu seed fix
+Doua rulari cu acelasi seed trebuie sa produca fisiere identice.
+
+java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1,4 --seed=12345 --output=output/test-seed-a
+java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1,4 --seed=12345 --output=output/test-seed-b
+cmp -s output/test-seed-a/threads-1/publications.txt output/test-seed-b/threads-1/publications.txt; echo $?
+cmp -s output/test-seed-a/threads-1/subscriptions.txt output/test-seed-b/threads-1/subscriptions.txt; echo $?
+cmp -s output/test-seed-a/threads-4/publications.txt output/test-seed-b/threads-4/publications.txt; echo $?
+cmp -s output/test-seed-a/threads-4/subscriptions.txt output/test-seed-b/threads-4/subscriptions.txt; echo $?
+
+15. Test de consistenta intre 1 thread si 4 thread-uri
+Cu acelasi seed, datele generate trebuie sa fie identice indiferent de paralelizare; se schimba doar timpii.
+
+java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1,4 --seed=20260325 --output=output/test-consistency
+cmp -s output/test-consistency/threads-1/publications.txt output/test-consistency/threads-4/publications.txt; echo $?
+cmp -s output/test-consistency/threads-1/subscriptions.txt output/test-consistency/threads-4/subscriptions.txt; echo $?
+sed -n '1,40p' output/test-consistency/threads-1/summary.txt
+sed -n '1,40p' output/test-consistency/threads-4/summary.txt
+
+16. Inspectie rapida a fisierelor generate
+
+find output/test-small -maxdepth 3 -type f | sort
+sed -n '1,10p' output/test-small/threads-1/publications.txt
+sed -n '1,10p' output/test-small/threads-1/subscriptions.txt
+
+Interpretare rapida:
+- daca o comanda se termina fara exceptie, generarea a fost facuta corect pentru scenariul respectiv
+- in fisierele summary.txt si README.md trebuie sa apara requested, planned si actual
+- pentru seturi mari, planned si actual trebuie sa coincida cu procentele cerute
+- pentru seturi foarte mici, planned poate diferi de requested, dar actual trebuie sa coincida cu planned
+- pentru cmp, valoarea 0 inseamna ca fisierele comparate sunt identice

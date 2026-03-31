@@ -9,7 +9,8 @@ ruleaza benchmark cu mai multe niveluri de paralelizare si scrie automat acest r
 - paralelizare: `threads`
 - limbaj: `Java 21`
 - structura publicatie: fixa, cu campurile `company`, `value`, `drop`, `variation`, `date`
-- distributia campurilor din subscriptii este controlata exact pe baza unor numere tinta, nu doar random
+- distributia campurilor din subscriptii este controlata exact pe baza unor tinte intregi planificate, nu doar random
+- cand un procent nu poate fi reprezentat exact pentru dimensiunea setului, se foloseste cea mai apropiata distributie fezabila
 - pentru campul `company`, operatorul `=` este controlat separat si respecta pragul minim cerut
 - fiecare subscriptie contine cel putin un camp
 
@@ -30,30 +31,32 @@ ruleaza benchmark cu mai multe niveluri de paralelizare si scrie automat acest r
 
 | Threads | Publicatii ms | Subscriptii ms | Scriere ms | Total ms | Speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 45 | 300 | 277 | 622 | 1.00x |
-| 4 | 10 | 96 | 155 | 261 | 2.38x |
+| 1 | 19 | 175 | 186 | 381 | 1.00x |
+| 4 | 4 | 54 | 89 | 148 | 2.57x |
 
 ## Verificare distributii
 
 Valorile de mai jos provin din rularea cu `4` thread-uri.
 
-| Camp | Tinta | Obtinut |
-| --- | ---: | ---: |
-| company | 90% | 36000 (90.00%) |
-| value | 70% | 28000 (70.00%) |
-| drop | 55% | 22000 (55.00%) |
-| variation | 65% | 26000 (65.00%) |
-| date | 40% | 16000 (40.00%) |
+| Camp | Cerut | Tinta discreta | Obtinut |
+| --- | ---: | ---: | ---: |
+| company | 90% | 36000 (90.00%) | 36000 (90.00%) |
+| value | 70% | 28000 (70.00%) | 28000 (70.00%) |
+| drop | 55% | 22000 (55.00%) | 22000 (55.00%) |
+| variation | 65% | 26000 (65.00%) | 26000 (65.00%) |
+| date | 40% | 16000 (40.00%) | 16000 (40.00%) |
 
-- `company` cu operator `=`: `25200 / 36000` = `70.00%`
+- `company` cu operator `=` cerut: `70%`
+- `company` cu operator `=` tinta discreta minima: `25200 / 36000` = `70.00%`
+- `company` cu operator `=` obtinut: `25200 / 36000` = `70.00%`
 
 ## Specificatii masina
 
 - CPU: `12th Gen Intel(R) Core(TM) i7-12650H`
 - logical cores: `16`
-- OS: `Linux 6.8.0-101-generic`
+- OS: `Linux 6.8.0-106-generic`
 - Java: `21.0.10`
-- raport generat la: `2026-03-25 11:23:48`
+- raport generat la: `2026-03-31 20:13:30`
 
 ## Fisiere generate
 

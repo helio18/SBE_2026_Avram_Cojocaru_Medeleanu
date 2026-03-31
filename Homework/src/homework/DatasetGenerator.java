@@ -98,6 +98,14 @@ public class DatasetGenerator {
         return subscriptions;
     }
 
+    public Map<String, Integer> computeTargetFieldCounts() {
+        return createTargetFieldCounts(config.getSubscriptionCount());
+    }
+
+    public int computeTargetCompanyEqualsCount(int companyPresentCount) {
+        return minimumCount(companyPresentCount, config.getCompanyEqualityPercentage());
+    }
+
     public Map<String, Integer> collectFieldCounts(Subscription[] subscriptions) {
         LinkedHashMap<String, Integer> counts = new LinkedHashMap<>();
         for (String fieldName : config.getSubscriptionFieldPercentages().keySet()) {
@@ -152,14 +160,14 @@ public class DatasetGenerator {
 
     private LinkedHashMap<String, boolean[]> createPresencePlan(int subscriptionCount) {
         LinkedHashMap<String, boolean[]> presencePlan = new LinkedHashMap<>();
+        LinkedHashMap<String, Integer> targetCounts = createTargetFieldCounts(subscriptionCount);
         int[] presentCounts = new int[subscriptionCount];
         int offset = 1;
 
-        for (Map.Entry<String, Integer> entry : config.getSubscriptionFieldPercentages().entrySet()) {
-            int targetCount = exactCount(subscriptionCount, entry.getValue().intValue());
+        for (Map.Entry<String, Integer> entry : targetCounts.entrySet()) {
             boolean[] fieldPresence = createExactBooleanArray(
                     subscriptionCount,
-                    targetCount,
+                    entry.getValue().intValue(),
                     config.getBaseSeed() + offset * 10_007L);
 
             presencePlan.put(entry.getKey(), fieldPresence);
@@ -175,6 +183,51 @@ public class DatasetGenerator {
 
         repairEmptySubscriptions(presencePlan, presentCounts);
         return presencePlan;
+    }
+
+    private LinkedHashMap<String, Integer> createTargetFieldCounts(int subscriptionCount) {
+        LinkedHashMap<String, Integer> targetCounts = new LinkedHashMap<>();
+        List<FieldTarget> fieldTargets = new ArrayList<>();
+        int totalAssigned = 0;
+
+        for (Map.Entry<String, Integer> entry : config.getSubscriptionFieldPercentages().entrySet()) {
+            double desiredCount = targetCountAsDouble(subscriptionCount, entry.getValue().intValue());
+            int roundedCount = exactCount(subscriptionCount, entry.getValue().intValue());
+            FieldTarget fieldTarget = new FieldTarget(entry.getKey(), desiredCount, roundedCount, subscriptionCount);
+            fieldTargets.add(fieldTarget);
+            totalAssigned += roundedCount;
+        }
+
+        while (totalAssigned < subscriptionCount) {
+            FieldTarget bestTarget = null;
+            double bestPenalty = Double.POSITIVE_INFINITY;
+
+            for (FieldTarget fieldTarget : fieldTargets) {
+                if (!fieldTarget.canIncrement()) {
+                    continue;
+                }
+
+                double penalty = fieldTarget.incrementPenalty();
+                if (bestTarget == null || penalty < bestPenalty) {
+                    bestTarget = fieldTarget;
+                    bestPenalty = penalty;
+                }
+            }
+
+            if (bestTarget == null) {
+                throw new IllegalStateException(
+                        "Could not derive enough field occurrences for all subscriptions.");
+            }
+
+            bestTarget.increment();
+            totalAssigned++;
+        }
+
+        for (FieldTarget fieldTarget : fieldTargets) {
+            targetCounts.put(fieldTarget.getFieldName(), Integer.valueOf(fieldTarget.getAssignedCount()));
+        }
+
+        return targetCounts;
     }
 
     private boolean[] createCompanyEqualityPlan(boolean[] companyPresence) {
@@ -322,8 +375,47 @@ public class DatasetGenerator {
         return (int) Math.round((totalCount * percentage) / 100.0d);
     }
 
+    private static double targetCountAsDouble(int totalCount, int percentage) {
+        return (totalCount * percentage) / 100.0d;
+    }
+
     private static int minimumCount(int totalCount, int percentage) {
         return (int) Math.ceil((totalCount * percentage) / 100.0d);
+    }
+
+    private static final class FieldTarget {
+
+        private final String fieldName;
+        private final double desiredCount;
+        private final int maxCount;
+        private int assignedCount;
+
+        private FieldTarget(String fieldName, double desiredCount, int assignedCount, int maxCount) {
+            this.fieldName = fieldName;
+            this.desiredCount = desiredCount;
+            this.assignedCount = assignedCount;
+            this.maxCount = maxCount;
+        }
+
+        private String getFieldName() {
+            return fieldName;
+        }
+
+        private int getAssignedCount() {
+            return assignedCount;
+        }
+
+        private boolean canIncrement() {
+            return assignedCount < maxCount;
+        }
+
+        private double incrementPenalty() {
+            return Math.abs((assignedCount + 1) - desiredCount) - Math.abs(assignedCount - desiredCount);
+        }
+
+        private void increment() {
+            assignedCount++;
+        }
     }
 
     @FunctionalInterface

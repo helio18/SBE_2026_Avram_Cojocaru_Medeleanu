@@ -14,5 +14,3 @@ Note:
 Hint: NU se recomanda utilizarea distributiei random in obtinerea procentelor cerute pentru campurile subscriptiilor (nu garanteaza o distributie precisa).
 
 Setul generat va fi memorat in fisiere text. Tema se poate realiza in echipe de pana la 3 studenti.
-
-Orice modificari vor fi anuntate in timp util in cadrul acestei pagini.

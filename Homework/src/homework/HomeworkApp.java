@@ -66,7 +66,10 @@ public class HomeworkApp {
         generator.writeSubscriptions(subscriptionFile, subscriptions);
         long afterWriting = System.nanoTime();
 
+        Map<String, Integer> targetFieldCounts = generator.computeTargetFieldCounts();
         Map<String, Integer> fieldCounts = generator.collectFieldCounts(subscriptions);
+        int targetCompanyEqualsCount = generator.computeTargetCompanyEqualsCount(
+                targetFieldCounts.getOrDefault("company", Integer.valueOf(0)).intValue());
         int companyEqualsCount = generator.collectCompanyEqualsCount(subscriptions);
         Path summaryFile = runDir.resolve("summary.txt");
 
@@ -78,7 +81,9 @@ public class HomeworkApp {
                 millisBetween(afterPublications, afterSubscriptions),
                 millisBetween(afterSubscriptions, afterWriting),
                 millisBetween(start, afterWriting),
+                targetFieldCounts,
                 fieldCounts,
+                targetCompanyEqualsCount,
                 companyEqualsCount,
                 publicationFile,
                 subscriptionFile,
@@ -105,28 +110,45 @@ public class HomeworkApp {
         builder.append('\n');
         builder.append("Subscription field frequencies:\n");
 
-        for (Map.Entry<String, Integer> entry : result.getFieldCounts().entrySet()) {
-            int count = entry.getValue().intValue();
-            double percent = 100.0d * count / result.getSubscriptionCount();
+        for (Map.Entry<String, Integer> entry : result.getTargetFieldCounts().entrySet()) {
+            String fieldName = entry.getKey();
+            int targetCount = entry.getValue().intValue();
+            int actualCount = result.getFieldCounts().get(fieldName).intValue();
+            double targetPercent = 100.0d * targetCount / result.getSubscriptionCount();
+            double actualPercent = 100.0d * actualCount / result.getSubscriptionCount();
             builder.append("- ")
-                    .append(entry.getKey())
-                    .append(": target ")
-                    .append(config.getSubscriptionFieldPercentages().get(entry.getKey()))
-                    .append("%, actual ")
-                    .append(count)
+                    .append(fieldName)
+                    .append(": requested ")
+                    .append(config.getSubscriptionFieldPercentages().get(fieldName))
+                    .append("%, planned ")
+                    .append(targetCount)
                     .append(" (")
-                    .append(formatPercent(percent))
+                    .append(formatPercent(targetPercent))
+                    .append("%), actual ")
+                    .append(actualCount)
+                    .append(" (")
+                    .append(formatPercent(actualPercent))
                     .append("%)")
                     .append('\n');
         }
 
+        double targetEqualsPercent = result.getTargetCompanyPresentCount() == 0
+                ? 0.0d
+                : 100.0d * result.getTargetCompanyEqualsCount() / result.getTargetCompanyPresentCount();
         double equalsPercent = result.getCompanyPresentCount() == 0
                 ? 0.0d
                 : 100.0d * result.getCompanyEqualsCount() / result.getCompanyPresentCount();
         builder.append('\n');
-        builder.append("Company equality target: at least ")
+        builder.append("Company equality requested: at least ")
                 .append(config.getCompanyEqualityPercentage())
                 .append("%\n");
+        builder.append("Company equality planned minimum: ")
+                .append(result.getTargetCompanyEqualsCount())
+                .append(" / ")
+                .append(result.getTargetCompanyPresentCount())
+                .append(" (")
+                .append(formatPercent(targetEqualsPercent))
+                .append("%)\n");
         builder.append("Company equality actual: ")
                 .append(result.getCompanyEqualsCount())
                 .append(" / ")
@@ -156,7 +178,8 @@ public class HomeworkApp {
         builder.append("- paralelizare: `threads`\n");
         builder.append("- limbaj: `Java 21`\n");
         builder.append("- structura publicatie: fixa, cu campurile `company`, `value`, `drop`, `variation`, `date`\n");
-        builder.append("- distributia campurilor din subscriptii este controlata exact pe baza unor numere tinta, nu doar random\n");
+        builder.append("- distributia campurilor din subscriptii este controlata exact pe baza unor tinte intregi planificate, nu doar random\n");
+        builder.append("- cand un procent nu poate fi reprezentat exact pentru dimensiunea setului, se foloseste cea mai apropiata distributie fezabila\n");
         builder.append("- pentru campul `company`, operatorul `=` este controlat separat si respecta pragul minim cerut\n");
         builder.append("- fiecare subscriptie contine cel putin un camp\n\n");
 
@@ -206,28 +229,49 @@ public class HomeworkApp {
         builder.append("Valorile de mai jos provin din rularea cu `")
                 .append(referenceResult.getThreadCount())
                 .append("` thread-uri.\n\n");
-        builder.append("| Camp | Tinta | Obtinut |\n");
-        builder.append("| --- | ---: | ---: |\n");
+        builder.append("| Camp | Cerut | Tinta discreta | Obtinut |\n");
+        builder.append("| --- | ---: | ---: | ---: |\n");
 
-        for (Map.Entry<String, Integer> entry : referenceResult.getFieldCounts().entrySet()) {
-            int count = entry.getValue().intValue();
+        for (Map.Entry<String, Integer> entry : referenceResult.getTargetFieldCounts().entrySet()) {
+            String fieldName = entry.getKey();
+            int targetCount = entry.getValue().intValue();
+            int count = referenceResult.getFieldCounts().get(fieldName).intValue();
+            double targetPercent = 100.0d * targetCount / referenceResult.getSubscriptionCount();
             double actualPercent = 100.0d * count / referenceResult.getSubscriptionCount();
             builder.append("| ")
-                    .append(entry.getKey())
+                    .append(fieldName)
                     .append(" | ")
-                    .append(config.getSubscriptionFieldPercentages().get(entry.getKey()))
+                    .append(config.getSubscriptionFieldPercentages().get(fieldName))
                     .append("% | ")
+                    .append(targetCount)
+                    .append(" (")
+                    .append(formatPercent(targetPercent))
+                    .append("%) | ")
                     .append(count)
                     .append(" (")
                     .append(formatPercent(actualPercent))
                     .append("%) |\n");
         }
 
+        double targetEqualsPercent = referenceResult.getTargetCompanyPresentCount() == 0
+                ? 0.0d
+                : 100.0d * referenceResult.getTargetCompanyEqualsCount()
+                        / referenceResult.getTargetCompanyPresentCount();
         double equalsPercent = referenceResult.getCompanyPresentCount() == 0
                 ? 0.0d
                 : 100.0d * referenceResult.getCompanyEqualsCount() / referenceResult.getCompanyPresentCount();
         builder.append('\n');
-        builder.append("- `company` cu operator `=`: `")
+        builder.append("- `company` cu operator `=` cerut: `")
+                .append(config.getCompanyEqualityPercentage())
+                .append("%`\n");
+        builder.append("- `company` cu operator `=` tinta discreta minima: `")
+                .append(referenceResult.getTargetCompanyEqualsCount())
+                .append(" / ")
+                .append(referenceResult.getTargetCompanyPresentCount())
+                .append("` = `")
+                .append(formatPercent(targetEqualsPercent))
+                .append("%`\n");
+        builder.append("- `company` cu operator `=` obtinut: `")
                 .append(referenceResult.getCompanyEqualsCount())
                 .append(" / ")
                 .append(referenceResult.getCompanyPresentCount())
