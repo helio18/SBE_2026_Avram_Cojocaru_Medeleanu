@@ -20,42 +20,11 @@ public class HomeworkApp {
         }
 
         GeneratorConfig config = options.applyTo(GeneratorConfig.defaultConfig());
+        DatasetGenerator generator = new DatasetGenerator(config);
         SystemInfo systemInfo = SystemInfo.read();
         Path outputDir = options.getOutputDir();
         Files.createDirectories(outputDir);
 
-        if (options.getMode().equals("generator")) {
-            runGeneratorMode(config, systemInfo, outputDir);
-            return;
-        }
-
-        if (!options.getMode().equals("project")) {
-            throw new IllegalArgumentException("Mod necunoscut: " + options.getMode());
-        }
-
-        runProjectMode(config, options.applyTo(ProjectConfig.defaultConfig()), systemInfo, outputDir);
-    }
-
-    private static void runProjectMode(
-            GeneratorConfig generatorConfig,
-            ProjectConfig projectConfig,
-            SystemInfo systemInfo,
-            Path outputDir) throws IOException {
-        ProjectSimulationRunner simulationRunner = new ProjectSimulationRunner(generatorConfig, projectConfig);
-        List<ProjectEvaluationResult> results = simulationRunner.run(outputDir);
-
-        if (outputDir.normalize().equals(Path.of("output"))) {
-            simulationRunner.writeProjectReadme(Path.of("README.md"), systemInfo, results);
-        }
-        simulationRunner.writeProjectReadme(outputDir.resolve("README.md"), systemInfo, results);
-        System.out.println("Project README updated with evaluation results.");
-    }
-
-    private static void runGeneratorMode(
-            GeneratorConfig config,
-            SystemInfo systemInfo,
-            Path outputDir) throws IOException {
-        DatasetGenerator generator = new DatasetGenerator(config);
         List<BenchmarkResult> results = new ArrayList<>();
 
         for (int threadCount : config.getBenchmarkThreadCounts()) {
@@ -72,8 +41,11 @@ public class HomeworkApp {
                             + " ms");
         }
 
+        if (outputDir.normalize().equals(Path.of("output"))) {
+            writeReadme(Path.of("README.md"), config, systemInfo, results);
+        }
         writeReadme(outputDir.resolve("README.md"), config, systemInfo, results);
-        System.out.println("Generator README updated with benchmark results.");
+        System.out.println("README.md updated with benchmark results.");
     }
 
     private static BenchmarkResult runBenchmark(

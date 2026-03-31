@@ -18,26 +18,6 @@ public class Publication {
         this.date = date;
     }
 
-    public String getCompany() {
-        return company;
-    }
-
-    public double getValue() {
-        return value;
-    }
-
-    public double getDrop() {
-        return drop;
-    }
-
-    public double getVariation() {
-        return variation;
-    }
-
-    public String getDate() {
-        return date;
-    }
-
     public String toFileLine(int index) {
         return String.format(
                 Locale.US,
