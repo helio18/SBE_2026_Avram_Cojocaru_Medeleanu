@@ -91,7 +91,39 @@ public class DatasetGenerator {
                     conditions.add(SubscriptionCondition.text("date", randomDateOperator(random), date));
                 }
 
-                subscriptions[index] = new Subscription(conditions);
+                String subscriberId = "subscriber-" + ((index % 3) + 1);
+                String subscriptionId = "subscription-" + (index + 1);
+                subscriptions[index] = new Subscription(subscriberId, subscriptionId, conditions);
+            }
+        });
+
+        return subscriptions;
+    }
+
+    public Subscription[] generateSimpleCompanySubscriptions(
+            int subscriptionCount,
+            int threadCount,
+            int companyEqualityPercentage,
+            int subscriberCount) {
+        boolean[] equalityPlan = createEqualityPlan(
+                subscriptionCount,
+                companyEqualityPercentage,
+                config.getBaseSeed() + 55_555L);
+        Subscription[] subscriptions = new Subscription[subscriptionCount];
+
+        runInParallel(subscriptionCount, threadCount, (start, end) -> {
+            for (int index = start; index < end; index++) {
+                SplittableRandom random = new SplittableRandom(
+                        config.getBaseSeed() + ((long) index + 1L) * SUBSCRIPTION_SEED_STEP + 19_937L);
+                String subscriberId = "subscriber-" + ((index % Math.max(1, subscriberCount)) + 1);
+                String subscriptionId = "simple-subscription-" + (index + 1);
+                String company = pickRandom(config.getCompanies(), random);
+                String operator = equalityPlan[index] ? "=" : "!=";
+
+                subscriptions[index] = new Subscription(
+                        subscriberId,
+                        subscriptionId,
+                        List.of(SubscriptionCondition.text("company", operator, company)));
             }
         });
 
@@ -248,6 +280,24 @@ public class DatasetGenerator {
         }
 
         return companyEquals;
+    }
+
+    private boolean[] createEqualityPlan(int totalCount, int equalityPercentage, long seed) {
+        boolean[] equalityPlan = new boolean[totalCount];
+        List<Integer> indexes = new ArrayList<>();
+
+        for (int index = 0; index < totalCount; index++) {
+            indexes.add(Integer.valueOf(index));
+        }
+
+        shuffle(indexes, new SplittableRandom(seed));
+
+        int equalsCount = minimumCount(totalCount, equalityPercentage);
+        for (int index = 0; index < equalsCount; index++) {
+            equalityPlan[indexes.get(index).intValue()] = true;
+        }
+
+        return equalityPlan;
     }
 
     private boolean[] createExactBooleanArray(int totalCount, int trueCount, long seed) {

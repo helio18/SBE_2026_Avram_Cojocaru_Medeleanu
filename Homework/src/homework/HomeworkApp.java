@@ -8,7 +8,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 public class HomeworkApp {
 
@@ -25,259 +24,87 @@ public class HomeworkApp {
         Path outputDir = options.getOutputDir();
         Files.createDirectories(outputDir);
 
-        List<BenchmarkResult> results = new ArrayList<>();
+        int brokerCount = options.getBrokerCount() != null ? options.getBrokerCount().intValue() : 3;
+        int publisherCount = options.getPublisherCount() != null ? options.getPublisherCount().intValue() : 2;
+        int subscriberCount = options.getSubscriberCount() != null ? options.getSubscriberCount().intValue() : 3;
+        long feedDurationMillis = options.getFeedDurationMillis() != null ? options.getFeedDurationMillis().longValue() : 180_000L;
+
+        PubSubSimulation simulation = new PubSubSimulation(generator, config, brokerCount, publisherCount, subscriberCount, feedDurationMillis);
+        List<PubSubSimulationResult> results = new ArrayList<>();
 
         for (int threadCount : config.getBenchmarkThreadCounts()) {
             Path runDir = outputDir.resolve("threads-" + threadCount);
-            Files.createDirectories(runDir);
-            BenchmarkResult result = runBenchmark(generator, config, threadCount, runDir);
+            PubSubSimulationResult result = simulation.run(threadCount, runDir);
             results.add(result);
 
             System.out.println(
                     "Finished run with "
                             + threadCount
-                            + " thread(s): total "
-                            + result.getTotalMillis()
-                            + " ms");
+                            + " thread(s): delivered "
+                            + result.getSuccessfulPublicationCount()
+                            + " publications");
         }
+
+        Path readmeFile = outputDir.resolve("README.md");
+        writeReadme(readmeFile, config, systemInfo, results);
 
         if (outputDir.normalize().equals(Path.of("output"))) {
             writeReadme(Path.of("README.md"), config, systemInfo, results);
         }
-        writeReadme(outputDir.resolve("README.md"), config, systemInfo, results);
-        System.out.println("README.md updated with benchmark results.");
-    }
 
-    private static BenchmarkResult runBenchmark(
-            DatasetGenerator generator,
-            GeneratorConfig config,
-            int threadCount,
-            Path runDir) throws IOException {
-        long start = System.nanoTime();
-        Publication[] publications = generator.generatePublications(threadCount);
-        long afterPublications = System.nanoTime();
-
-        Subscription[] subscriptions = generator.generateSubscriptions(threadCount);
-        long afterSubscriptions = System.nanoTime();
-
-        Path publicationFile = runDir.resolve("publications.txt");
-        Path subscriptionFile = runDir.resolve("subscriptions.txt");
-        generator.writePublications(publicationFile, publications);
-        generator.writeSubscriptions(subscriptionFile, subscriptions);
-        long afterWriting = System.nanoTime();
-
-        Map<String, Integer> targetFieldCounts = generator.computeTargetFieldCounts();
-        Map<String, Integer> fieldCounts = generator.collectFieldCounts(subscriptions);
-        int targetCompanyEqualsCount = generator.computeTargetCompanyEqualsCount(
-                targetFieldCounts.getOrDefault("company", Integer.valueOf(0)).intValue());
-        int companyEqualsCount = generator.collectCompanyEqualsCount(subscriptions);
-        Path summaryFile = runDir.resolve("summary.txt");
-
-        BenchmarkResult result = new BenchmarkResult(
-                threadCount,
-                config.getPublicationCount(),
-                config.getSubscriptionCount(),
-                millisBetween(start, afterPublications),
-                millisBetween(afterPublications, afterSubscriptions),
-                millisBetween(afterSubscriptions, afterWriting),
-                millisBetween(start, afterWriting),
-                targetFieldCounts,
-                fieldCounts,
-                targetCompanyEqualsCount,
-                companyEqualsCount,
-                publicationFile,
-                subscriptionFile,
-                summaryFile);
-
-        writeRunSummary(summaryFile, config, result);
-        return result;
-    }
-
-    private static void writeRunSummary(Path summaryFile, GeneratorConfig config, BenchmarkResult result)
-            throws IOException {
-        StringBuilder builder = new StringBuilder();
-        builder.append("Threads: ").append(result.getThreadCount()).append('\n');
-        builder.append("Publications: ").append(result.getPublicationCount()).append('\n');
-        builder.append("Subscriptions: ").append(result.getSubscriptionCount()).append('\n');
-        builder.append("Publication generation ms: ")
-                .append(result.getPublicationGenerationMillis())
-                .append('\n');
-        builder.append("Subscription generation ms: ")
-                .append(result.getSubscriptionGenerationMillis())
-                .append('\n');
-        builder.append("Writing ms: ").append(result.getWritingMillis()).append('\n');
-        builder.append("Total ms: ").append(result.getTotalMillis()).append('\n');
-        builder.append('\n');
-        builder.append("Subscription field frequencies:\n");
-
-        for (Map.Entry<String, Integer> entry : result.getTargetFieldCounts().entrySet()) {
-            String fieldName = entry.getKey();
-            int targetCount = entry.getValue().intValue();
-            int actualCount = result.getFieldCounts().get(fieldName).intValue();
-            double targetPercent = 100.0d * targetCount / result.getSubscriptionCount();
-            double actualPercent = 100.0d * actualCount / result.getSubscriptionCount();
-            builder.append("- ")
-                    .append(fieldName)
-                    .append(": requested ")
-                    .append(config.getSubscriptionFieldPercentages().get(fieldName))
-                    .append("%, planned ")
-                    .append(targetCount)
-                    .append(" (")
-                    .append(formatPercent(targetPercent))
-                    .append("%), actual ")
-                    .append(actualCount)
-                    .append(" (")
-                    .append(formatPercent(actualPercent))
-                    .append("%)")
-                    .append('\n');
-        }
-
-        double targetEqualsPercent = result.getTargetCompanyPresentCount() == 0
-                ? 0.0d
-                : 100.0d * result.getTargetCompanyEqualsCount() / result.getTargetCompanyPresentCount();
-        double equalsPercent = result.getCompanyPresentCount() == 0
-                ? 0.0d
-                : 100.0d * result.getCompanyEqualsCount() / result.getCompanyPresentCount();
-        builder.append('\n');
-        builder.append("Company equality requested: at least ")
-                .append(config.getCompanyEqualityPercentage())
-                .append("%\n");
-        builder.append("Company equality planned minimum: ")
-                .append(result.getTargetCompanyEqualsCount())
-                .append(" / ")
-                .append(result.getTargetCompanyPresentCount())
-                .append(" (")
-                .append(formatPercent(targetEqualsPercent))
-                .append("%)\n");
-        builder.append("Company equality actual: ")
-                .append(result.getCompanyEqualsCount())
-                .append(" / ")
-                .append(result.getCompanyPresentCount())
-                .append(" (")
-                .append(formatPercent(equalsPercent))
-                .append("%)\n");
-
-        Files.writeString(summaryFile, builder.toString());
+        System.out.println("README.md updated with simulation results.");
     }
 
     private static void writeReadme(
             Path readmeFile,
             GeneratorConfig config,
             SystemInfo systemInfo,
-            List<BenchmarkResult> results) throws IOException {
-        BenchmarkResult baseline = results.get(0);
-        BenchmarkResult referenceResult = results.get(results.size() - 1);
+            List<PubSubSimulationResult> results) throws IOException {
+        PubSubSimulationResult referenceResult = results.get(results.size() - 1);
 
         StringBuilder builder = new StringBuilder();
-        builder.append("# Homework - Generator de publicatii si subscriptii\n\n");
-        builder.append("Acest proiect implementeaza integral cerinta temei in Java, in VS Code.\n");
-        builder.append("Generatorul produce seturi de publicatii si subscriptii, salveaza rezultatele in fisiere text,\n");
-        builder.append("ruleaza benchmark cu mai multe niveluri de paralelizare si scrie automat acest raport.\n\n");
+        builder.append("# Homework - Publish/Subscribe Content-Based System\n\n");
+        builder.append("Acest proiect implementeaza o arhitectura publish/subscribe content-based in Java.\n");
+        builder.append("Publicatiile si subscriptiile sunt generate determinist, apoi sunt rutate printr-un overlay de brokeri\n");
+        builder.append("care distribuie fragmentele de subscriptii pe mai multe noduri si calculeaza matching-ul pe continut.\n\n");
 
-        builder.append("## Decizii de implementare\n\n");
-        builder.append("- paralelizare: `threads`\n");
-        builder.append("- limbaj: `Java 21`\n");
-        builder.append("- structura publicatie: fixa, cu campurile `company`, `value`, `drop`, `variation`, `date`\n");
-        builder.append("- distributia campurilor din subscriptii este controlata exact pe baza unor tinte intregi planificate, nu doar random\n");
-        builder.append("- cand un procent nu poate fi reprezentat exact pentru dimensiunea setului, se foloseste cea mai apropiata distributie fezabila\n");
-        builder.append("- pentru campul `company`, operatorul `=` este controlat separat si respecta pragul minim cerut\n");
-        builder.append("- fiecare subscriptie contine cel putin un camp\n\n");
-
-        builder.append("## Configuratie folosita\n\n");
+        builder.append("## Configuratie\n\n");
         builder.append("- publicatii generate: `").append(config.getPublicationCount()).append("`\n");
         builder.append("- subscriptii generate: `").append(config.getSubscriptionCount()).append("`\n");
-        builder.append("- thread-uri testate: `")
-                .append(formatThreadCounts(config.getBenchmarkThreadCounts()))
-                .append("`\n");
-        builder.append("- frecvente campuri in subscriptii:\n");
-        for (Map.Entry<String, Integer> entry : config.getSubscriptionFieldPercentages().entrySet()) {
-            builder.append("  - ")
-                    .append(entry.getKey())
-                    .append(": `")
-                    .append(entry.getValue())
-                    .append("%`\n");
-        }
-        builder.append("- prag minim pentru operatorul `=` pe `company`: `")
-                .append(config.getCompanyEqualityPercentage())
-                .append("%`\n\n");
+        builder.append("- thread-uri testate: `").append(formatThreadCounts(config.getBenchmarkThreadCounts())).append("`\n");
+        builder.append("- brokeri in overlay: `").append(referenceResult.getBrokerCount()).append("`\n");
+        builder.append("- publisheri simulati: `").append(referenceResult.getPublisherCount()).append("`\n");
+        builder.append("- subscriberi simulati: `").append(referenceResult.getSubscriberCount()).append("`\n");
+        builder.append("- durata feed-ului: `").append(referenceResult.getFeedDurationMillis()).append(" ms`\n\n");
 
-        builder.append("## Benchmark\n\n");
-        builder.append("| Threads | Publicatii ms | Subscriptii ms | Scriere ms | Total ms | Speedup |\n");
+        builder.append("## Rezultate\n\n");
+        builder.append("| Threads | Publicatii livrate | Notificari | Latență medie ms | Matching 100% | Matching 25% |\n");
         builder.append("| --- | ---: | ---: | ---: | ---: | ---: |\n");
-
-        for (BenchmarkResult result : results) {
-            double speedup = baseline.getTotalMillis() == 0
-                    ? 1.0d
-                    : (double) baseline.getTotalMillis() / (double) result.getTotalMillis();
+        for (PubSubSimulationResult result : results) {
             builder.append("| ")
                     .append(result.getThreadCount())
                     .append(" | ")
-                    .append(result.getPublicationGenerationMillis())
+                    .append(result.getSuccessfulPublicationCount())
                     .append(" | ")
-                    .append(result.getSubscriptionGenerationMillis())
+                    .append(result.getNotificationCount())
                     .append(" | ")
-                    .append(result.getWritingMillis())
+                    .append(formatPercent(result.getAverageDeliveryLatencyMillis()))
                     .append(" | ")
-                    .append(result.getTotalMillis())
-                    .append(" | ")
-                    .append(formatPercent(speedup))
-                    .append("x |\n");
-        }
-
-        builder.append('\n');
-        builder.append("## Verificare distributii\n\n");
-        builder.append("Valorile de mai jos provin din rularea cu `")
-                .append(referenceResult.getThreadCount())
-                .append("` thread-uri.\n\n");
-        builder.append("| Camp | Cerut | Tinta discreta | Obtinut |\n");
-        builder.append("| --- | ---: | ---: | ---: |\n");
-
-        for (Map.Entry<String, Integer> entry : referenceResult.getTargetFieldCounts().entrySet()) {
-            String fieldName = entry.getKey();
-            int targetCount = entry.getValue().intValue();
-            int count = referenceResult.getFieldCounts().get(fieldName).intValue();
-            double targetPercent = 100.0d * targetCount / referenceResult.getSubscriptionCount();
-            double actualPercent = 100.0d * count / referenceResult.getSubscriptionCount();
-            builder.append("| ")
-                    .append(fieldName)
-                    .append(" | ")
-                    .append(config.getSubscriptionFieldPercentages().get(fieldName))
+                    .append(formatPercent(result.getMatchingRateAtOneHundredPercent()))
                     .append("% | ")
-                    .append(targetCount)
-                    .append(" (")
-                    .append(formatPercent(targetPercent))
-                    .append("%) | ")
-                    .append(count)
-                    .append(" (")
-                    .append(formatPercent(actualPercent))
-                    .append("%) |\n");
+                    .append(formatPercent(result.getMatchingRateAtTwentyFivePercent()))
+                    .append("% |\n");
         }
 
-        double targetEqualsPercent = referenceResult.getTargetCompanyPresentCount() == 0
-                ? 0.0d
-                : 100.0d * referenceResult.getTargetCompanyEqualsCount()
-                        / referenceResult.getTargetCompanyPresentCount();
-        double equalsPercent = referenceResult.getCompanyPresentCount() == 0
-                ? 0.0d
-                : 100.0d * referenceResult.getCompanyEqualsCount() / referenceResult.getCompanyPresentCount();
         builder.append('\n');
-        builder.append("- `company` cu operator `=` cerut: `")
-                .append(config.getCompanyEqualityPercentage())
-                .append("%`\n");
-        builder.append("- `company` cu operator `=` tinta discreta minima: `")
-                .append(referenceResult.getTargetCompanyEqualsCount())
-                .append(" / ")
-                .append(referenceResult.getTargetCompanyPresentCount())
-                .append("` = `")
-                .append(formatPercent(targetEqualsPercent))
-                .append("%`\n");
-        builder.append("- `company` cu operator `=` obtinut: `")
-                .append(referenceResult.getCompanyEqualsCount())
-                .append(" / ")
-                .append(referenceResult.getCompanyPresentCount())
-                .append("` = `")
-                .append(formatPercent(equalsPercent))
-                .append("%`\n\n");
+        builder.append("## Evaluare\n\n");
+        long feedMillis = referenceResult.getFeedDurationMillis();
+        String feedDisplay = (feedMillis % 60000L == 0L)
+            ? (String.format("%d minute(s)", feedMillis / 60000L))
+            : (String.format(Locale.US, "%d ms", feedMillis));
+        builder.append("- feed continuu simulat: `").append(feedDisplay).append("`\n");
+        builder.append("- subscriptii simple folosite la comparatie: `10,000`\n");
+        builder.append("- raportul include numarul de publicatii livrate cu succes, latenta medie si rata de matching pentru company equality `100%` vs `25%`.\n\n");
 
         builder.append("## Specificatii masina\n\n");
         builder.append("- CPU: `").append(systemInfo.getCpuModel()).append("`\n");
@@ -289,40 +116,30 @@ public class HomeworkApp {
                 .append("`\n\n");
 
         builder.append("## Fisiere generate\n\n");
-        for (BenchmarkResult result : results) {
+        for (PubSubSimulationResult result : results) {
             builder.append("- run `")
                     .append(result.getThreadCount())
                     .append("` thread-uri:\n");
-            builder.append("  - `")
-                    .append(result.getPublicationFile().toString())
-                    .append("`\n");
-            builder.append("  - `")
-                    .append(result.getSubscriptionFile().toString())
-                    .append("`\n");
-            builder.append("  - `")
-                    .append(result.getSummaryFile().toString())
-                    .append("`\n");
+            builder.append("  - `").append(result.getPublicationFile()).append("`\n");
+            builder.append("  - `").append(result.getSubscriptionFile()).append("`\n");
+            builder.append("  - `").append(result.getSummaryFile()).append("`\n");
         }
 
         builder.append('\n');
         builder.append("## Rulare\n\n");
         builder.append("Din terminal, din folderul `Homework`:\n\n");
         builder.append("```bash\n");
-        builder.append("find src -name '*.java' -print0 | xargs -0 javac -d bin\n");
+        builder.append("Get-ChildItem -Recurse -Filter *.java src | ForEach-Object { $_.FullName } | javac -d bin\n");
         builder.append("java -cp bin homework.HomeworkApp\n");
         builder.append("```\n");
 
         builder.append('\n');
-        builder.append("Exemplu pentru testare rapida cu parametri custom:\n\n");
+        builder.append("Exemplu pentru rulare custom:\n\n");
         builder.append("```bash\n");
         builder.append("java -cp bin homework.HomeworkApp --publications=1000 --subscriptions=1000 --threads=1,4 --output=output/test-small\n");
         builder.append("```\n");
 
         Files.writeString(readmeFile, builder.toString());
-    }
-
-    private static long millisBetween(long start, long end) {
-        return (end - start) / 1_000_000L;
     }
 
     private static String formatPercent(double value) {

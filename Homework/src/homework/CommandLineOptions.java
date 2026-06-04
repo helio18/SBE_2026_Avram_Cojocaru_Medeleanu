@@ -15,6 +15,10 @@ public class CommandLineOptions {
     private Integer dateFrequency;
     private Integer companyEqualityPercentage;
     private Long seed;
+    private Integer brokerCount;
+    private Integer publisherCount;
+    private Integer subscriberCount;
+    private Long feedDurationMillis;
     private int[] threadCounts;
     private Path outputDir = Path.of("output");
     private boolean helpRequested;
@@ -60,6 +64,18 @@ public class CommandLineOptions {
                     break;
                 case "--company-equals":
                     options.companyEqualityPercentage = Integer.valueOf(parsePercentage(name, value));
+                    break;
+                case "--brokers":
+                    options.brokerCount = Integer.valueOf(parsePositiveInt(name, value));
+                    break;
+                case "--publishers":
+                    options.publisherCount = Integer.valueOf(parsePositiveInt(name, value));
+                    break;
+                case "--subscribers":
+                    options.subscriberCount = Integer.valueOf(parsePositiveInt(name, value));
+                    break;
+                case "--feed-duration-ms":
+                    options.feedDurationMillis = Long.valueOf(parseLong(name, value));
                     break;
                 case "--seed":
                     options.seed = Long.valueOf(parseLong(name, value));
@@ -115,6 +131,22 @@ public class CommandLineOptions {
         return config;
     }
 
+    public Integer getBrokerCount() {
+        return brokerCount;
+    }
+
+    public Integer getPublisherCount() {
+        return publisherCount;
+    }
+
+    public Integer getSubscriberCount() {
+        return subscriberCount;
+    }
+
+    public Long getFeedDurationMillis() {
+        return feedDurationMillis;
+    }
+
     public Path getOutputDir() {
         return outputDir;
     }
@@ -142,6 +174,10 @@ public class CommandLineOptions {
                 "  --company-equals=<0..100>",
                 "  --seed=<numar>",
                 "  --output=<director>",
+                "  --brokers=<num>",
+                "  --publishers=<num>",
+                "  --subscribers=<num>",
+                "  --feed-duration-ms=<milliseconds>",
                 "",
                 "Exemple:",
                 "  java -cp bin homework.HomeworkApp",

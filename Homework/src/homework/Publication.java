@@ -18,6 +18,43 @@ public class Publication {
         this.date = date;
     }
 
+    public String getCompany() {
+        return company;
+    }
+
+    public double getValue() {
+        return value;
+    }
+
+    public double getDrop() {
+        return drop;
+    }
+
+    public double getVariation() {
+        return variation;
+    }
+
+    public String getDate() {
+        return date;
+    }
+
+    public Object getFieldValue(String fieldName) {
+        switch (fieldName) {
+            case "company":
+                return company;
+            case "value":
+                return Double.valueOf(value);
+            case "drop":
+                return Double.valueOf(drop);
+            case "variation":
+                return Double.valueOf(variation);
+            case "date":
+                return date;
+            default:
+                throw new IllegalArgumentException("Camp necunoscut: " + fieldName);
+        }
+    }
+
     public String toFileLine(int index) {
         return String.format(
                 Locale.US,

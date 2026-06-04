@@ -61,8 +61,8 @@ public class GeneratorConfig {
         fieldPercentages.put("date", Integer.valueOf(40));
 
         return new GeneratorConfig(
-                40_000,
-                40_000,
+            1_800,
+            10_000,
                 2026_0325L,
                 fieldPercentages,
                 70,
