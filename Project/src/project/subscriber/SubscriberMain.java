@@ -112,12 +112,10 @@ public final class SubscriberMain {
 
     private static final class Endpoint {
 
-        final String id;
         final String host;
         final int port;
 
         Endpoint(String id, String host, int port) {
-            this.id = id;
             this.host = host;
             this.port = port;
         }

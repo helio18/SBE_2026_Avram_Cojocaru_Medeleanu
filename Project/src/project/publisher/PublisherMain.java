@@ -7,7 +7,6 @@ import project.transport.Args;
 import project.transport.MessageCodec;
 import project.transport.OutboundConnections;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -109,12 +108,10 @@ public final class PublisherMain {
 
     private static final class Endpoint {
 
-        final String id;
         final String host;
         final int port;
 
         Endpoint(String id, String host, int port) {
-            this.id = id;
             this.host = host;
             this.port = port;
         }
