@@ -31,6 +31,10 @@ public class SubscriptionCondition {
         return operator;
     }
 
+    public String getRenderedValue() {
+        return renderedValue;
+    }
+
     public String toFileToken() {
         return "(" + fieldName + "," + operator + "," + renderedValue + ")";
     }
