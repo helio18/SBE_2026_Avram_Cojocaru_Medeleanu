@@ -40,12 +40,24 @@ Fiecare subscriber tine un contor `i` si trimite subscriptia `i` catre `brokers[
 bash Project/build.bash
 ```
 
+Pe Windows / PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Project\build.ps1
+```
+
 Compileaza `Homework/src` (in `Homework/bin`) si apoi `Project/src` (in `Project/bin`), reutilizand clasele `homework.*` prin classpath.
 
 ## Cum se ruleaza evaluarea
 
 ```bash
 bash Project/run-eval.bash
+```
+
+Pe Windows / PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Project\run-eval.ps1
 ```
 
 Pasi:
@@ -77,6 +89,15 @@ DURATION_SECONDS=10 TOTAL_SUBSCRIPTIONS=300 PUBLICATION_RATE=20 bash Project/run
 
 # rulare conform cerintei (3 min, 10k subscriptii)
 bash Project/run-eval.bash
+```
+
+Echivalent pe Windows / PowerShell:
+
+```powershell
+$env:DURATION_SECONDS=10
+$env:TOTAL_SUBSCRIPTIONS=300
+$env:PUBLICATION_RATE=20
+powershell -ExecutionPolicy Bypass -File Project\run-eval.ps1
 ```
 
 ### Cum se ruleaza componentele manual
@@ -114,7 +135,7 @@ java -cp "Homework/bin;Project/bin" project.publisher.PublisherMain \
     --stats-file=/tmp/P1.stats
 ```
 
-Pe Windows / Git Bash, classpath-ul trebuie convertit prin `cygpath -w` (scriptul `run-eval.bash` o face automat).
+Pe Windows, foloseste scripturile `build.ps1` si `run-eval.ps1`. Pentru rulare manuala, inlocuieste path-urile Linux precum `/tmp/...` cu un path local, de exemplu `Project/output/tmp/...`.
 
 ## Structura codului
 

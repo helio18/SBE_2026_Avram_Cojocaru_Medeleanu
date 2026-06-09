@@ -67,6 +67,10 @@ local.properties
 ##############################
 .vscode/
 .code-workspace
+!.vscode/
+!.vscode/settings.json
+!Project/.vscode/
+!Project/.vscode/settings.json
 
 ##############################
 ## Miscellaneous
