@@ -8,9 +8,6 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
 
-// Client TCP pentru publicatii serializate cu Protocol Buffers.
-// Foloseste o conexiune persistenta per (host, port), cu o singura
-// reincercare daca scrierea esueaza (acelasi pattern ca OutboundConnections).
 public final class BinaryPubClient {
 
     private final ConcurrentHashMap<String, Sender> senders = new ConcurrentHashMap<>();

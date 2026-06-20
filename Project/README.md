@@ -133,7 +133,7 @@ Publisher (folosește pub-porturile binare):
 java -cp "Homework/bin;Project/bin;Project/lib/protobuf-java-4.28.3.jar" project.publisher.PublisherMain \
     --id=P1 \
     --brokers=B1@localhost:7001,B2@localhost:7002,B3@localhost:7003 \
-    --publications=10000 --rate=25 --duration-seconds=180 \
+    --publications=10000 --rate=50 --duration-seconds=180 \
     --stats-file=/tmp/P1.stats
 ```
 
@@ -214,25 +214,59 @@ Forwarding-ul `PUB` intre brokeri ramane in format text, asa cum cere cerinta bo
 - `Project/src/project/transport/BinaryPubServer.java`, `BinaryPubClient.java` - transport binar TCP cu framing length-delimited;
 - `Broker` accepta `--pub-port` si numara `publicationsReceivedBinary` in fisierul de statistici.
 
+### Comparatie: implementare default (text) vs bonus (protobuf)
+
+Publisher-ul accepta `--transport=text|protobuf` (implicit `protobuf`). Modul `text` foloseste calea de dinainte de bonus: `PUB` serializat text linie-cu-linie, trimis pe portul text al brokerului (acelasi pe care brokerul deja trateaza `PUB`-urile forwardate). Modul `protobuf` foloseste transportul binar dedicat de mai sus. Astfel se pot rula si compara ambele variante pe acelasi scenariu.
+
+Comparatia se ruleaza cu:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Project\compare-transport.ps1
+```
+
+Rezultate (acelasi scenariu nesaturat: company-equals=100, 10000 subscriptii, 3 subscriberi, 3 brokeri, rata 50 pub/s, feed 60 s, i7-12650H):
+
+| Metrica | Text (fara bonus) | Protobuf (bonus) |
+| --- | --- | --- |
+| Publicatii emise | 3000 | 3000 |
+| Octeti / publicatie (medie) | 75.99 B | **65.76 B** |
+| Total octeti emisi | 227 962 | 197 288 |
+| Notificari livrate | 3 750 314 | 3 750 314 |
+| Latenta medie de livrare | 921.067 ms | **318.166 ms** |
+
+- **Echivalenta functionala**: ambele variante livreaza exact acelasi numar de notificari (3 750 314), deci protobuf nu schimba semantica, doar reprezentarea pe sarma.
+- **Dimensiune payload**: protobuf reduce cu **~13.5%** octetii per publicatie (codare binara compacta vs text cu zecimale formatate `%.6f`).
+- **Latenta**: in aceasta rulare protobuf a livrat cu latenta mai mica, in parte pentru ca publicatiile intra pe un port binar dedicat, separat de `LineServer`-ul care duce notificarile; valorile absolute de latenta sunt sensibile la incarcarea masinii.
+
 ## Rezultate evaluare
 
-Rulare completa conform cerintei: 3 minute feed, 10000 subscriptii, 3 subscriberi, 1 publisher la rata 25 pub/s, procesor Intel Core i5-10400. Raport detaliat: [output/eval.zmWV8h/final-report.md](output/eval.zmWV8h/final-report.md).
+Rulare conform cerintei: 3 minute feed (180 s), 10000 subscriptii, 3 subscriberi, 1 publisher, procesor 12th Gen Intel Core i7-12650H, OpenJDK 17.0.14. Raportul live se genereaza local sub `Project/output/eval.*/final-report.md` (folderul `output/` este gitignored, deci nu este versionat).
 
-| Metrica | Scenariu A (100% `=`) | Scenariu B (25% `=`) |
+### (a) + (b) Livrare si latenta (sistem live, scenariu nesaturat)
+
+Masurate pe scenariu A (100% `=`), unde volumul de notificari ramane in limita debitului sistemului:
+
+| Metrica | Valoare |
+| --- | --- |
+| Subscriptii inregistrate | 10000 (round-robin 3334 / 3333 / 3333 pe brokeri) |
+| Publicatii emise in 3 min (rata 50/s) | 9000 |
+| Publicatii intrate efectiv in retea (binar) | 9000 (3000 / broker direct + 6000 forwardate de la vecini) |
+| Notificari livrate cu succes | 11 251 130 |
+| Latenta medie de livrare | **25.303 ms** |
+
+### (c) Rata de matching: 100% `=` vs 25% `=`
+
+Rata de matching este o proprietate semantica a subscriptiilor si a publicatiilor, deci se masoara pe setul de date generat (10000 subscriptii pe campul `company` x 5000 publicatii = 50 000 000 perechi evaluate cu `MatchingEngine`), independent de eventuala saturare a livrarii:
+
+| Scenariu | Rata masurata | Rata teoretica |
 | --- | --- | --- |
-| Subscriptii inregistrate | 10000 | 10000 |
-| Publicatii emise in 3 minute | 4500 | 4500 |
-| Notificari livrate cu succes | 5 625 331 | 30 930 163 |
-| Latenta medie de livrare | **5.269 ms** | **24.240 ms** |
-| Rata de matching | **12.5007%** | **68.7337%** |
-| Rata de matching teoretica | 12.5% (1/8) | 68.75% (0.25 * 1/8 + 0.75 * 7/8) |
-| Eroare fata de teorie | 0.005 puncte procentuale | 0.02 puncte procentuale |
+| A (100% `=`) | **12.4924%** | 12.5% (1/8) |
+| B (25% `=`) | **68.7519%** | 68.75% (0.25 * 1/8 + 0.75 * 7/8) |
 
-Concluzia comparativa pentru cerinta (c):
+Cu 8 valori posibile pentru `company`: o subscriptie cu `=` matcheaza 1/8 din publicatii; o subscriptie cu `!=` matcheaza 7/8. La 100% `=` rata este 12.5%; la 25% `=` cele 75% de subscriptii cu `!=` ridica rata la ~68.75%. Masurarea live de pe scenariu A (12.5007% in raportul generat) confirma aceeasi valoare, validand empiric motorul de matching.
 
-- Cu 8 valori posibile pentru `company`, scenariu A (100% `=`) matcheaza in medie 1/8 din publicatii per subscriptie.
-- Scenariu B (25% `=`) are 75% din subscriptii cu `!=` care matcheaza 7/8, deci rata totala creste la ~68.75%.
-- Scenariu B **livreaza ~5.5x mai multe notificari** decat scenariu A pentru aceeasi rata de publicatii.
-- Latenta in scenariu B creste de la 5 ms la 24 ms din cauza saturatiei TCP loopback la ~170k notificari/secunda; sistemul ramane functional fara pierderi.
+### Observatie privind debitul scenariului B
 
-Stats per broker din rularea de referinta (vezi `Project/output/eval.zmWV8h/scenario-A-eq-100/B*.stats`) arata distributia balansata a subscriptiilor (round-robin: ~3334 / 3333 / 3333) si rutarea publicatiilor prin overlay (fiecare broker primeste atat publicatii direct de la publisher, cat si forwardate de la vecini).
+In rularea live, scenariu B satureaza calea de livrare pe aceasta masina: cele ~75% subscriptii cu `!=` genereaza ~68.75% * 10000 = ~6875 notificari per publicatie, adica peste 100k notificari/s catre subscriberi prin TCP loopback, mai mult decat poate prelucra `LineServer`-ul single-thread de pe subscriber. Coada de livrare creste (latenta de ordinul zecilor de secunde) atat la 50 pub/s cat si la 25 pub/s. De aceea (a) si (b) se raporteaza pe scenariu A (nesaturat), iar (c) pe setul de date (livrare-agnostic). Cresterea debitului de livrare (de ex. pool de thread-uri pentru notificari) ar permite si masurarea live nesaturata a scenariului B, dar nu este necesara pentru cerintele temei.
+
+Stats per broker (vezi `Project/output/eval.*/scenario-A-eq-100/B*.stats`) arata distributia balansata a subscriptiilor (round-robin: 3334 / 3333 / 3333) si rutarea publicatiilor prin overlay (fiecare broker primeste atat publicatii direct de la publisher prin transport binar, cat si forwardate de la vecini).

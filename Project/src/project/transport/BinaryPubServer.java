@@ -9,10 +9,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.function.Consumer;
 
-// Server TCP care primeste publicatii serializate cu Protocol Buffers,
-// folosind framing length-delimited (writeDelimitedTo / parseDelimitedFrom).
-// Doar publicatiile publisher -> broker trec prin acest server; restul
-// mesajelor sistemului folosesc LineServer pe alt port.
 public final class BinaryPubServer {
 
     private final int port;
