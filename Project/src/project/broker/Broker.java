@@ -3,7 +3,9 @@ package project.broker;
 import homework.Publication;
 import homework.Subscription;
 import project.matching.MatchingEngine;
+import project.proto.Pubsub;
 import project.routing.RoutingTable;
+import project.transport.BinaryPubServer;
 import project.transport.LineServer;
 import project.transport.MessageCodec;
 import project.transport.OutboundConnections;
@@ -21,6 +23,7 @@ public final class Broker {
 
     private final String brokerId;
     private final int listenPort;
+    private final int pubPort;
     private final Map<String, Peer> peers;
 
     private final OutboundConnections outbound = new OutboundConnections();
@@ -31,6 +34,7 @@ public final class Broker {
     private final ConcurrentHashMap<String, Boolean> seenAdvertisements = new ConcurrentHashMap<>();
 
     private final AtomicLong publicationsReceived = new AtomicLong();
+    private final AtomicLong publicationsReceivedBinary = new AtomicLong();
     private final AtomicLong publicationsForwarded = new AtomicLong();
     private final AtomicLong publicationsMatchedLocally = new AtomicLong();
     private final AtomicLong notificationsSent = new AtomicLong();
@@ -38,23 +42,30 @@ public final class Broker {
     private final AtomicLong advertisementsReceived = new AtomicLong();
 
     private LineServer server;
+    private BinaryPubServer binaryServer;
 
-    public Broker(String brokerId, int listenPort, Map<String, Peer> peers) {
+    public Broker(String brokerId, int listenPort, int pubPort, Map<String, Peer> peers) {
         this.brokerId = brokerId;
         this.listenPort = listenPort;
+        this.pubPort = pubPort;
         this.peers = new LinkedHashMap<>(peers);
     }
 
     public void start() throws IOException {
         server = new LineServer(listenPort, this::handleIncomingLine);
         server.start();
+        binaryServer = new BinaryPubServer(pubPort, this::handleBinaryPublication);
+        binaryServer.start();
         System.out.println("[" + brokerId + "] listening on port " + listenPort
-                + ", peers=" + peers.keySet());
+                + " (text) and " + pubPort + " (protobuf pub), peers=" + peers.keySet());
     }
 
     public void stop(Path statsFile) {
         if (server != null) {
             server.stop();
+        }
+        if (binaryServer != null) {
+            binaryServer.stop();
         }
         outbound.closeAll();
         writeStats(statsFile);
@@ -131,12 +142,34 @@ public final class Broker {
         double variation = Double.parseDouble(parts[7]);
         String date = parts[8];
 
+        Publication publication = new Publication(company, value, drop, variation, date);
+        processPublication(publicationId, emitTimestamp, hopCount, publication);
+    }
+
+    private void handleBinaryPublication(Pubsub.Publication message) {
+        publicationsReceivedBinary.incrementAndGet();
+        Publication publication = new Publication(
+                message.getCompany(),
+                message.getValue(),
+                message.getDrop(),
+                message.getVariation(),
+                message.getDate());
+        processPublication(
+                message.getPubId(),
+                message.getEmitTimestampMs(),
+                message.getHopCount(),
+                publication);
+    }
+
+    private void processPublication(
+            String publicationId,
+            long emitTimestamp,
+            int hopCount,
+            Publication publication) {
         if (seenPublications.putIfAbsent(publicationId, Boolean.TRUE) != null) {
             return;
         }
         publicationsReceived.incrementAndGet();
-
-        Publication publication = new Publication(company, value, drop, variation, date);
 
         boolean matchedLocally = false;
         for (Map.Entry<String, LocalSubscription> entry : localSubscriptions.entrySet()) {
@@ -177,6 +210,7 @@ public final class Broker {
         builder.append("subscriptionsReceived=").append(subscriptionsReceived.get()).append('\n');
         builder.append("advertisementsReceived=").append(advertisementsReceived.get()).append('\n');
         builder.append("publicationsReceived=").append(publicationsReceived.get()).append('\n');
+        builder.append("publicationsReceivedBinary=").append(publicationsReceivedBinary.get()).append('\n');
         builder.append("publicationsMatchedLocally=").append(publicationsMatchedLocally.get()).append('\n');
         builder.append("publicationsForwarded=").append(publicationsForwarded.get()).append('\n');
         builder.append("notificationsSent=").append(notificationsSent.get()).append('\n');

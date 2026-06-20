@@ -4,6 +4,8 @@
 .mtj.tmp/
 *.class
 *.jar
+!Project/lib/protobuf-java-4.28.3.jar
+Project/lib/protoc-28.3/
 *.war
 *.ear
 *.nar

@@ -4,6 +4,8 @@ Set-StrictMode -Version Latest
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $buildScript = Join-Path $scriptDir "build.ps1"
 $projectBin = Join-Path $scriptDir "bin"
+$protobufJar = Join-Path $scriptDir "lib\protobuf-java-4.28.3.jar"
+$runtimeClasspath = ".\bin;$protobufJar"
 
 function Get-EnvInt {
     param(
@@ -211,30 +213,36 @@ function Run-Scenario {
 
     Write-Step "Scenario $ScenarioName (company-equals=$CompanyEquals%)"
 
-    $brokerList = "B1@localhost:5001,B2@localhost:5002,B3@localhost:5003"
+    # Subscriberii si peering-ul intre brokeri folosesc porturile text (5001-3).
+    # Publisher-ul foloseste pub-port-urile binare (7001-3) pentru protobuf.
+    $brokerListText = "B1@localhost:5001,B2@localhost:5002,B3@localhost:5003"
+    $brokerListPub = "B1@localhost:7001,B2@localhost:7002,B3@localhost:7003"
 
     $brokerProcesses = @(
         (Start-JavaProcess -Name "B1" -OutDir $outDir -Arguments @(
-                "-cp", ".\bin",
+                "-cp", $runtimeClasspath,
                 "project.broker.BrokerMain",
                 "--id=B1",
                 "--port=5001",
+                "--pub-port=7001",
                 "--peers=B2@localhost:5002,B3@localhost:5003",
                 "--stop-file=$stopFile",
                 "--stats-file=$(Join-Path $outDir 'B1.stats')")),
         (Start-JavaProcess -Name "B2" -OutDir $outDir -Arguments @(
-                "-cp", ".\bin",
+                "-cp", $runtimeClasspath,
                 "project.broker.BrokerMain",
                 "--id=B2",
                 "--port=5002",
+                "--pub-port=7002",
                 "--peers=B1@localhost:5001,B3@localhost:5003",
                 "--stop-file=$stopFile",
                 "--stats-file=$(Join-Path $outDir 'B2.stats')")),
         (Start-JavaProcess -Name "B3" -OutDir $outDir -Arguments @(
-                "-cp", ".\bin",
+                "-cp", $runtimeClasspath,
                 "project.broker.BrokerMain",
                 "--id=B3",
                 "--port=5003",
+                "--pub-port=7003",
                 "--peers=B1@localhost:5001,B2@localhost:5002",
                 "--stop-file=$stopFile",
                 "--stats-file=$(Join-Path $outDir 'B3.stats')"))
@@ -257,11 +265,11 @@ function Run-Scenario {
         }
 
         $subscriberProcesses += Start-JavaProcess -Name $subId -OutDir $outDir -Arguments @(
-            "-cp", ".\bin",
+            "-cp", $runtimeClasspath,
             "project.subscriber.SubscriberMain",
             "--id=$subId",
             "--listen-port=$listenPort",
-            "--brokers=$brokerList",
+            "--brokers=$brokerListText",
             "--subscriptions=$subsForThis",
             "--company-frequency=100",
             "--value-frequency=0",
@@ -286,10 +294,10 @@ function Run-Scenario {
         $publicationsTotal = $publicationRate * $durationSeconds + 1000
 
         $publisherProcesses += Start-JavaProcess -Name $pubId -OutDir $outDir -Arguments @(
-            "-cp", ".\bin",
+            "-cp", $runtimeClasspath,
             "project.publisher.PublisherMain",
             "--id=$pubId",
-            "--brokers=$brokerList",
+            "--brokers=$brokerListPub",
             "--publications=$publicationsTotal",
             "--rate=$publicationRate",
             "--duration-seconds=$durationSeconds",

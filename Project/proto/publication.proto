@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package project.proto;
+
+option java_package = "project.proto";
+option java_outer_classname = "Pubsub";
+
+// Mesaj binar pentru publicatiile transmise de la publisher la brokeri.
+// Doar acest mesaj este serializat binar (Protocol Buffers); celelalte
+// mesaje ale sistemului (SUB, ADV, NOT, precum si PUB-urile forwardate
+// intre brokeri) raman in formatul text linie-cu-linie original.
+message Publication {
+  string pub_id = 1;
+  int64 emit_timestamp_ms = 2;
+  int32 hop_count = 3;
+  string company = 4;
+  double value = 5;
+  double drop = 6;
+  double variation = 7;
+  string date = 8;
+}

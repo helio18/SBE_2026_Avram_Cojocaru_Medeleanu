@@ -3,9 +3,9 @@ package project.publisher;
 import homework.DatasetGenerator;
 import homework.GeneratorConfig;
 import homework.Publication;
+import project.proto.Pubsub;
 import project.transport.Args;
-import project.transport.MessageCodec;
-import project.transport.OutboundConnections;
+import project.transport.BinaryPubClient;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,10 +40,11 @@ public final class PublisherMain {
         DatasetGenerator generator = new DatasetGenerator(config);
         Publication[] publications = generator.generatePublications(threads);
 
-        OutboundConnections outbound = new OutboundConnections();
+        BinaryPubClient outbound = new BinaryPubClient();
 
         System.out.println("[" + publisherId + "] generated " + publications.length
-                + " publications, emitting at " + rate + "/s for up to " + durationSeconds + "s");
+                + " publications, emitting at " + rate + "/s for up to " + durationSeconds + "s"
+                + " (protobuf binary serialization)");
 
         long startMillis = System.currentTimeMillis();
         long endMillis = startMillis + durationSeconds * 1000L;
@@ -57,10 +58,19 @@ public final class PublisherMain {
             Publication publication = publications[(int) (publicationsSent % publications.length)];
             long emitTimestamp = System.currentTimeMillis();
             String publicationId = pubIdPrefix + "-" + (publicationsSent + 1L);
-            String message = MessageCodec.buildPublication(publicationId, emitTimestamp, 1, publication);
+            Pubsub.Publication message = Pubsub.Publication.newBuilder()
+                    .setPubId(publicationId)
+                    .setEmitTimestampMs(emitTimestamp)
+                    .setHopCount(1)
+                    .setCompany(publication.getCompany())
+                    .setValue(publication.getValue())
+                    .setDrop(publication.getDrop())
+                    .setVariation(publication.getVariation())
+                    .setDate(publication.getDate())
+                    .build();
 
             Endpoint broker = brokers.get((int) (publicationsSent % brokers.size()));
-            outbound.sendLine(broker.host, broker.port, message);
+            outbound.send(broker.host, broker.port, message);
             publicationsSent++;
 
             long expectedElapsed = (publicationsSent * 1000L) / Math.max(1, rate);

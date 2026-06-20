@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 HOMEWORK_BIN="$REPO_ROOT/Homework/bin"
 PROJECT_BIN="$SCRIPT_DIR/bin"
+PROTOBUF_JAR="$SCRIPT_DIR/lib/protobuf-java-4.28.3.jar"
 
 DURATION_SECONDS="${DURATION_SECONDS:-180}"
 TOTAL_SUBSCRIPTIONS="${TOTAL_SUBSCRIPTIONS:-10000}"
@@ -16,9 +17,9 @@ SUB_SEND_GRACE_SECONDS="${SUB_SEND_GRACE_SECONDS:-8}"
 DRAIN_GRACE_SECONDS="${DRAIN_GRACE_SECONDS:-5}"
 
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
-    CP="$(cygpath -w "$HOMEWORK_BIN");$(cygpath -w "$PROJECT_BIN")"
+    CP="$(cygpath -w "$HOMEWORK_BIN");$(cygpath -w "$PROJECT_BIN");$(cygpath -w "$PROTOBUF_JAR")"
 else
-    CP="$HOMEWORK_BIN:$PROJECT_BIN"
+    CP="$HOMEWORK_BIN:$PROJECT_BIN:$PROTOBUF_JAR"
 fi
 
 log_step() {
@@ -61,10 +62,13 @@ run_scenario() {
     local subscriber_pids=()
     local publisher_pids=()
 
-    local broker_list="B1@localhost:5001,B2@localhost:5002,B3@localhost:5003"
+    # Subscriberii si peering-ul folosesc porturile text (5001-3).
+    # Publisher-ul foloseste pub-port-urile binare (7001-3) pentru protobuf.
+    local broker_list_text="B1@localhost:5001,B2@localhost:5002,B3@localhost:5003"
+    local broker_list_pub="B1@localhost:7001,B2@localhost:7002,B3@localhost:7003"
 
     java -cp "$CP" project.broker.BrokerMain \
-        --id=B1 --port=5001 \
+        --id=B1 --port=5001 --pub-port=7001 \
         --peers=B2@localhost:5002,B3@localhost:5003 \
         --stop-file="$stop_file" \
         --stats-file="$out_dir/B1.stats" \
@@ -72,7 +76,7 @@ run_scenario() {
     broker_pids+=($!)
 
     java -cp "$CP" project.broker.BrokerMain \
-        --id=B2 --port=5002 \
+        --id=B2 --port=5002 --pub-port=7002 \
         --peers=B1@localhost:5001,B3@localhost:5003 \
         --stop-file="$stop_file" \
         --stats-file="$out_dir/B2.stats" \
@@ -80,7 +84,7 @@ run_scenario() {
     broker_pids+=($!)
 
     java -cp "$CP" project.broker.BrokerMain \
-        --id=B3 --port=5003 \
+        --id=B3 --port=5003 --pub-port=7003 \
         --peers=B1@localhost:5001,B2@localhost:5002 \
         --stop-file="$stop_file" \
         --stats-file="$out_dir/B3.stats" \
@@ -106,7 +110,7 @@ run_scenario() {
         java -cp "$CP" project.subscriber.SubscriberMain \
             --id="$sub_id" \
             --listen-port="$listen_port" \
-            --brokers="$broker_list" \
+            --brokers="$broker_list_text" \
             --subscriptions="$subs_for_this" \
             --company-frequency=100 \
             --value-frequency=0 \
@@ -133,7 +137,7 @@ run_scenario() {
 
         java -cp "$CP" project.publisher.PublisherMain \
             --id="$pub_id" \
-            --brokers="$broker_list" \
+            --brokers="$broker_list_pub" \
             --publications="$publications_total" \
             --rate="$PUBLICATION_RATE" \
             --duration-seconds="$DURATION_SECONDS" \

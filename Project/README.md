@@ -104,20 +104,22 @@ powershell -ExecutionPolicy Bypass -File Project\run-eval.ps1
 
 Pentru debug sau experimente, componentele se pot porni si individual.
 
+Notă: clasele generate pentru protobuf depind de `protobuf-java-4.28.3.jar`, care trebuie inclus pe classpath atât la `javac` cât și la `java`.
+
 Broker:
 
 ```bash
-java -cp "Homework/bin;Project/bin" project.broker.BrokerMain \
-    --id=B1 --port=5001 \
+java -cp "Homework/bin;Project/bin;Project/lib/protobuf-java-4.28.3.jar" project.broker.BrokerMain \
+    --id=B1 --port=5001 --pub-port=7001 \
     --peers=B2@localhost:5002,B3@localhost:5003 \
     --stop-file=/tmp/STOP \
     --stats-file=/tmp/B1.stats
 ```
 
-Subscriber:
+Subscriber (folosește porturile text pentru SUB):
 
 ```bash
-java -cp "Homework/bin;Project/bin" project.subscriber.SubscriberMain \
+java -cp "Homework/bin;Project/bin;Project/lib/protobuf-java-4.28.3.jar" project.subscriber.SubscriberMain \
     --id=S1 --listen-port=6001 \
     --brokers=B1@localhost:5001,B2@localhost:5002,B3@localhost:5003 \
     --subscriptions=3334 --company-equals=100 \
@@ -125,12 +127,12 @@ java -cp "Homework/bin;Project/bin" project.subscriber.SubscriberMain \
     --stats-file=/tmp/S1.stats
 ```
 
-Publisher:
+Publisher (folosește pub-porturile binare):
 
 ```bash
-java -cp "Homework/bin;Project/bin" project.publisher.PublisherMain \
+java -cp "Homework/bin;Project/bin;Project/lib/protobuf-java-4.28.3.jar" project.publisher.PublisherMain \
     --id=P1 \
-    --brokers=B1@localhost:5001,B2@localhost:5002,B3@localhost:5003 \
+    --brokers=B1@localhost:7001,B2@localhost:7002,B3@localhost:7003 \
     --publications=10000 --rate=25 --duration-seconds=180 \
     --stats-file=/tmp/P1.stats
 ```
@@ -145,15 +147,23 @@ Project/src/project/
   matching/MatchingEngine.java    - filtrare content-based (Publication + Subscription)
   routing/RoutingTable.java       - per neighbor: predicate advertisate
   transport/
-    MessageCodec.java             - serializare/parsing mesaje SUB|ADV|PUB|NOT
+    MessageCodec.java             - serializare/parsing mesaje SUB|ADV|PUB|NOT (text)
     LineServer.java               - server TCP linie cu linie
     OutboundConnections.java      - cache de conexiuni TCP outbound (cu reconectare)
+    BinaryPubServer.java          - server TCP pentru publicatii protobuf (bonus 1)
+    BinaryPubClient.java          - client TCP pentru publicatii protobuf (bonus 1)
     Args.java                     - parser de argumente CLI + waitForStopFile
   broker/
     Broker.java                   - logica brokerului
     BrokerMain.java               - CLI entry
   publisher/PublisherMain.java    - CLI entry
   subscriber/SubscriberMain.java  - CLI entry
+
+Project/src-gen/project/proto/
+  Pubsub.java                     - cod Java generat din publication.proto
+
+Project/proto/publication.proto   - schema protobuf
+Project/lib/protobuf-java-*.jar   - runtime protobuf
 ```
 
 Modelul (`Publication`, `Subscription`, `SubscriptionCondition`) este reutilizat direct din `Homework/src/homework/` prin classpath, fara wrappere proprii.
@@ -166,10 +176,43 @@ Toate mesajele sunt linie text terminate cu `\n`, campuri separate prin `|`.
 | --- | --- |
 | `SUB` | `SUB\|<subId>\|<subscriberHost>\|<subscriberPort>\|<conditiiCodificate>` |
 | `ADV` | `ADV\|<subId>\|<originBroker>\|<hopCount>\|<conditiiCodificate>` |
-| `PUB` | `PUB\|<pubId>\|<emitTsMs>\|<hopCount>\|<company>\|<value>\|<drop>\|<variation>\|<date>` |
+| `PUB` | `PUB\|<pubId>\|<emitTsMs>\|<hopCount>\|<company>\|<value>\|<drop>\|<variation>\|<date>` (numai forwarding broker-broker) |
 | `NOT` | `NOT\|<pubId>\|<emitTsMs>\|<subId>\|<company>\|<value>\|<drop>\|<variation>\|<date>` |
 
 Conditiile sunt codificate cu acelasi token ca in fisierele Homework (`(field,op,value);(field,op,value);...`).
+
+## Bonus 1 - serializare binara Protocol Buffers
+
+Publicatiile emise de publisher catre brokeri sunt serializate cu **Google Protocol Buffers** (`protobuf-java 4.28.3`), nu in formatul text linie-cu-linie. Schema (`Project/proto/publication.proto`):
+
+```proto
+message Publication {
+  string pub_id = 1;
+  int64 emit_timestamp_ms = 2;
+  int32 hop_count = 3;
+  string company = 4;
+  double value = 5;
+  double drop = 6;
+  double variation = 7;
+  string date = 8;
+}
+```
+
+Codul Java generat de `protoc` este in `Project/src-gen/project/proto/Pubsub.java` (committed pentru a evita dependenta de `protoc` la build).
+Pentru regenerare, cu `protoc` 28.3 instalat: `protoc --proto_path=Project/proto --java_out=Project/src-gen Project/proto/publication.proto`.
+
+**Transport binar dedicat**: fiecare broker asculta pe doua porturi:
+- portul text (`--port=5001`) pentru `SUB`, `ADV`, `NOT` si pentru forwarding-ul `PUB` intre brokeri;
+- portul binar (`--pub-port=7001`) pentru `PUB` venit de la publisher, framing length-delimited (`Publication.writeDelimitedTo` / `parseDelimitedFrom`).
+
+Forwarding-ul `PUB` intre brokeri ramane in format text, asa cum cere cerinta bonus ("publicatiile publisher -> brokers"). Dupa deserializare, brokerul construieste mesaj text si propaga prin acelasi pipeline ca inainte.
+
+**Fisiere noi/atinse**:
+- `Project/lib/protobuf-java-4.28.3.jar` - biblioteca runtime (in classpath pentru `javac` si `java`);
+- `Project/proto/publication.proto` - schema;
+- `Project/src-gen/project/proto/Pubsub.java` - cod Java generat;
+- `Project/src/project/transport/BinaryPubServer.java`, `BinaryPubClient.java` - transport binar TCP cu framing length-delimited;
+- `Broker` accepta `--pub-port` si numara `publicationsReceivedBinary` in fisierul de statistici.
 
 ## Rezultate evaluare
 
