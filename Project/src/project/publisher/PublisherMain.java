@@ -4,6 +4,7 @@ import com.google.protobuf.CodedOutputStream;
 import homework.DatasetGenerator;
 import homework.GeneratorConfig;
 import homework.Publication;
+import project.crypto.MessageCrypto;
 import project.proto.Pubsub;
 import project.transport.Args;
 import project.transport.BinaryPubClient;
@@ -36,6 +37,11 @@ public final class PublisherMain {
         boolean useProtobuf = !transport.equalsIgnoreCase("text");
         boolean failover = Boolean.parseBoolean(options.getOrDefault("failover", "false"));
         int ackTimeoutMs = Integer.parseInt(options.getOrDefault("ack-timeout-ms", "30000"));
+        boolean encrypt = Boolean.parseBoolean(options.getOrDefault("encrypt", "false"));
+        String cryptoKey = options.getOrDefault("crypto-key", "");
+        if (encrypt && cryptoKey.isEmpty()) {
+            throw new IllegalArgumentException("--crypto-key is required when --encrypt=true");
+        }
         String pubIdPrefix = options.getOrDefault("pub-id-prefix", publisherId);
         Path stopFile = options.containsKey("stop-file") ? Path.of(options.get("stop-file")) : null;
         Path statsFile = options.containsKey("stats-file") ? Path.of(options.get("stats-file")) : null;
@@ -47,6 +53,13 @@ public final class PublisherMain {
                 .withBaseSeed(seed);
         DatasetGenerator generator = new DatasetGenerator(config);
         Publication[] publications = generator.generatePublications(threads);
+
+        if (encrypt) {
+            MessageCrypto crypto = new MessageCrypto(cryptoKey);
+            for (int index = 0; index < publications.length; index++) {
+                publications[index] = crypto.encrypt(publications[index]);
+            }
+        }
 
         BinaryPubClient binaryOutbound = useProtobuf ? new BinaryPubClient(ackTimeoutMs) : null;
         OutboundConnections textOutbound = useProtobuf ? null : new OutboundConnections();
@@ -133,6 +146,7 @@ public final class PublisherMain {
         StringBuilder statsBuilder = new StringBuilder();
         statsBuilder.append("publisherId=").append(publisherId).append('\n');
         statsBuilder.append("transport=").append(useProtobuf ? "protobuf" : "text").append('\n');
+        statsBuilder.append("encrypt=").append(encrypt).append('\n');
         statsBuilder.append("publicationsSent=").append(publicationsSent).append('\n');
         statsBuilder.append("failover=").append(failover).append('\n');
         statsBuilder.append("ackTimeoutMs=").append(useProtobuf ? ackTimeoutMs : 0).append('\n');

@@ -60,7 +60,7 @@ public final class Broker {
                 + " (text) and " + pubPort + " (protobuf pub), peers=" + peers.keySet());
     }
 
-    public void stop(Path statsFile) {
+    public void stop(Path statsFile, Path dumpFile) {
         if (server != null) {
             server.stop();
         }
@@ -69,6 +69,32 @@ public final class Broker {
         }
         outbound.closeAll();
         writeStats(statsFile);
+        if (dumpFile != null) {
+            dumpStore(dumpFile);
+        }
+    }
+
+    private void dumpStore(Path dumpFile) {
+        StringBuilder builder = new StringBuilder();
+        for (Map.Entry<String, LocalSubscription> entry : localSubscriptions.entrySet()) {
+            LocalSubscription record = entry.getValue();
+            builder.append(entry.getKey())
+                    .append('|')
+                    .append(MessageCodec.encodeConditions(record.subscription))
+                    .append('|')
+                    .append(record.subscriberHost)
+                    .append(':')
+                    .append(record.subscriberPort)
+                    .append('\n');
+        }
+        try {
+            if (dumpFile.getParent() != null) {
+                Files.createDirectories(dumpFile.getParent());
+            }
+            Files.writeString(dumpFile, builder.toString());
+        } catch (IOException ioException) {
+            System.err.println("[" + brokerId + "] failed to write store dump: " + ioException);
+        }
     }
 
     private void handleIncomingLine(String line) {

@@ -3,6 +3,7 @@ package project.subscriber;
 import homework.DatasetGenerator;
 import homework.GeneratorConfig;
 import homework.Subscription;
+import project.crypto.MessageCrypto;
 import project.transport.Args;
 import project.transport.LineServer;
 import project.transport.MessageCodec;
@@ -40,6 +41,11 @@ public final class SubscriberMain {
         long seed = Long.parseLong(options.getOrDefault("seed", "20260608"));
         int threads = Integer.parseInt(options.getOrDefault("threads", "1"));
         int replicas = Integer.parseInt(options.getOrDefault("replicas", "1"));
+        boolean encrypt = Boolean.parseBoolean(options.getOrDefault("encrypt", "false"));
+        String cryptoKey = options.getOrDefault("crypto-key", "");
+        if (encrypt && cryptoKey.isEmpty()) {
+            throw new IllegalArgumentException("--crypto-key is required when --encrypt=true");
+        }
         String subIdPrefix = options.getOrDefault("sub-id-prefix", subscriberId);
         String selfHost = options.getOrDefault("self-host", "localhost");
         Path stopFile = options.containsKey("stop-file") ? Path.of(options.get("stop-file")) : null;
@@ -70,6 +76,13 @@ public final class SubscriberMain {
 
         DatasetGenerator generator = new DatasetGenerator(configuration);
         Subscription[] subscriptions = generator.generateSubscriptions(threads);
+
+        if (encrypt) {
+            MessageCrypto crypto = new MessageCrypto(cryptoKey);
+            for (int index = 0; index < subscriptions.length; index++) {
+                subscriptions[index] = crypto.encrypt(subscriptions[index]);
+            }
+        }
 
         OutboundConnections outbound = new OutboundConnections();
         long sendStartMillis = System.currentTimeMillis();

@@ -16,6 +16,7 @@ public final class BrokerMain {
         String peersSpec = options.getOrDefault("peers", "");
         String stopFilePath = options.get("stop-file");
         String statsFilePath = options.get("stats-file");
+        String dumpStorePath = options.get("dump-store");
 
         Map<String, Broker.Peer> peers = new LinkedHashMap<>();
         if (!peersSpec.isEmpty()) {
@@ -40,6 +41,8 @@ public final class BrokerMain {
             }
         }
 
-        broker.stop(statsFilePath == null ? null : Path.of(statsFilePath));
+        broker.stop(
+                statsFilePath == null ? null : Path.of(statsFilePath),
+                dumpStorePath == null ? null : Path.of(dumpStorePath));
     }
 }

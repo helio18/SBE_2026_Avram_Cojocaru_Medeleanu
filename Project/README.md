@@ -269,6 +269,57 @@ Scriptul ruleaza trei scenarii scurte si **opreste efectiv brokerul B2** (`Stop-
 
 ACK-ul inchide fereastra critica in care publisher-ul scria publicatia catre un broker care cadea inainte sa o proceseze: fara ACK, publisher-ul retrimite aceeasi publicatie catre alt broker. Daca brokerul a procesat publicatia dar ACK-ul se pierde, retrimiterea poate produce duplicate, iar subscriberul le elimina prin cheia `(pubId, subId)`.
 
+## Bonus 3 - matching pe continut criptat
+
+Brokerii pot face matching content-based fara a avea acces la continutul real al publicatiilor si subscriptiilor. Cheia simetrica este detinuta doar de publisheri si subscriberi (`--crypto-key`); brokerii **nu** primesc cheia si vad numai token-uri criptate, dar ruteaza si potrivesc corect.
+
+Mecanismul (`project.crypto.MessageCrypto`, doar `javax.crypto`, fara biblioteci externe):
+
+1. **Egalitate - criptare determinista (searchable encryption)**: campurile text (`company`, `date`) sunt inlocuite cu token = `HMAC-SHA256(cheie, camp ":" valoare)`. Aceeasi valoare da acelasi token, deci brokerul rezolva `=` / `!=` comparand token-uri, fara a sti valoarea. HMAC este ireversibil si depinde de cheie.
+2. **Intervale - order-preserving encoding (OPE)**: campurile numerice (`value`, `drop`, `variation`) sunt codate cu o transformare afina secreta `cod = panta * valoare_cuantizata + intercept` (panta > 0, derivate din cheie). Codarea pastreaza ordinea, deci `<`, `>`, `<=`, `>=` si `=` functioneaza pe coduri, fara a dezvalui valoarea.
+
+Publisher-ul cripteaza publicatiile inainte de emitere, subscriberul cripteaza conditiile inainte de inregistrare, iar `MatchingEngine` / `Broker` / `MessageCodec` raman **neschimbate** pentru ca opereaza pe valori opace. Activare: `--encrypt=true --crypto-key=<secret>` pe publisher si subscriber.
+
+### Model de securitate si leakage (declarat onest)
+
+- Brokerul nu poate citi continutul (vede doar token-uri). Cheia il prefixeaza pe fiecare token cu numele campului (impiedica corelarea intre campuri) si blocheaza brute-force-ul fara cheie.
+- **Leakage cunoscut, asumat**: criptarea determinista dezvaluie *egalitatea* si *frecventa* (brokerul vede ca doua publicatii au aceeasi companie, fara a sti care), iar OPE dezvaluie in plus *ordinea* valorilor numerice. Acestea sunt limitarile standard ale schemelor care permit matching pe ciphertext; ascunderea frecventei/ordinii ar necesita scheme mai grele (predicate encryption, bucketization cu zgomot, ORE). OPE afina folosita aici este un demonstrator: pastreaza ordinea, dar parametrii liniari pot fi recuperati printr-un atac cu plaintext cunoscut.
+
+### Demonstratie
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Project\demo-encrypted-matching.ps1
+```
+
+Scriptul ruleaza acelasi scenariu in clar si criptat (publisher+subscriber au cheia, brokerii nu), apoi compara livrarea si afiseaza ce stocheaza brokerul (prin `--dump-store`). Rezultat (300 subscriptii, publisher la 20 pub/s, feed 15 s):
+
+| Mod | Notificari livrate |
+| --- | --- |
+| Plaintext | 11 205 |
+| Criptat | 11 205 |
+
+Matching-ul este **identic** (criptarea pastreaza semantica). Continutul stocat de broker:
+
+```
+# plaintext (lizibil de broker):
+S2-4|(company,=,"Apple")|localhost:6002
+S1-61|(company,=,"Nvidia")|localhost:6001
+S3-85|(company,=,"Meta")|localhost:6003
+
+# criptat (brokerul vede doar token-uri):
+S2-4|(company,=,"ZWQf_bbVgQgBc6sJ")|localhost:6002
+S1-61|(company,=,"1-KjahxXIcwTds-G")|localhost:6001
+S3-85|(company,=,"vo0nEie36SEdF4XM")|localhost:6003
+```
+
+Corectitudinea pe toti operatorii (egalitate + intervale) a fost validata si offline: pe seturi cu campuri mixte, numarul de potriviri pe date criptate este identic cu cel pe plaintext.
+
+**Fisiere noi/atinse**:
+- `Project/src/project/crypto/MessageCrypto.java` - HMAC determinist (egalitate) + OPE afina (intervale);
+- `PublisherMain` / `SubscriberMain` accepta `--encrypt` si `--crypto-key`;
+- `Broker` accepta `--dump-store` (dovada ca stocheaza doar token-uri);
+- `Project/demo-encrypted-matching.ps1` - demonstratia clar vs criptat.
+
 ## Rezultate evaluare
 
 Rulare conform cerintei: 3 minute feed (180 s), 10000 subscriptii, 3 subscriberi, 1 publisher, procesor 12th Gen Intel Core i7-12650H, OpenJDK 17.0.14. Raportul live se genereaza local sub `Project/output/eval.*/final-report.md` (folderul `output/` este gitignored, deci nu este versionat).
