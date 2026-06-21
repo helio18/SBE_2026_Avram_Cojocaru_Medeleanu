@@ -12,6 +12,7 @@ public final class BrokerMain {
         Map<String, String> options = Args.parse(arguments);
         String brokerId = options.getOrDefault("id", "B1");
         int port = Integer.parseInt(options.getOrDefault("port", "5001"));
+        int pubPort = Integer.parseInt(options.getOrDefault("pub-port", Integer.toString(port + 2000)));
         String peersSpec = options.getOrDefault("peers", "");
         String stopFilePath = options.get("stop-file");
         String statsFilePath = options.get("stats-file");
@@ -28,7 +29,7 @@ public final class BrokerMain {
             }
         }
 
-        Broker broker = new Broker(brokerId, port, peers);
+        Broker broker = new Broker(brokerId, port, pubPort, peers);
         broker.start();
 
         if (stopFilePath != null) {

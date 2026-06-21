@@ -1,7 +1,11 @@
 {
   "java.project.sourcePaths": [
     "Homework/src",
-    "Project/src"
+    "Project/src",
+    "Project/src-gen"
   ],
-  "java.project.outputPath": ".vscode/bin"
+  "java.project.outputPath": ".vscode/bin",
+  "java.project.referencedLibraries": [
+    "Project/lib/protobuf-java-4.28.3.jar"
+  ]
 }

@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -38,14 +39,16 @@ public final class SubscriberMain {
         int companyEquals = Integer.parseInt(options.getOrDefault("company-equals", "100"));
         long seed = Long.parseLong(options.getOrDefault("seed", "20260608"));
         int threads = Integer.parseInt(options.getOrDefault("threads", "1"));
+        int replicas = Integer.parseInt(options.getOrDefault("replicas", "1"));
         String subIdPrefix = options.getOrDefault("sub-id-prefix", subscriberId);
         String selfHost = options.getOrDefault("self-host", "localhost");
         Path stopFile = options.containsKey("stop-file") ? Path.of(options.get("stop-file")) : null;
         Path statsFile = options.containsKey("stats-file") ? Path.of(options.get("stats-file")) : null;
 
         List<Endpoint> brokers = parseBrokers(brokerListSpec);
+        replicas = Math.max(1, Math.min(brokers.size(), replicas));
 
-        Stats stats = new Stats();
+        Stats stats = new Stats(replicas > 1);
         LineServer server = new LineServer(listenPort, line -> stats.recordNotification(line));
         server.start();
 
@@ -72,17 +75,20 @@ public final class SubscriberMain {
         long sendStartMillis = System.currentTimeMillis();
 
         for (int index = 0; index < subscriptions.length; index++) {
-            Endpoint broker = brokers.get(index % brokers.size());
             String subscriptionId = subIdPrefix + "-" + (index + 1);
             String message = MessageCodec.buildSubscribe(
                     subscriptionId, selfHost, listenPort, subscriptions[index]);
-            outbound.sendLine(broker.host, broker.port, message);
+            for (int replica = 0; replica < replicas; replica++) {
+                Endpoint broker = brokers.get((index + replica) % brokers.size());
+                outbound.sendLine(broker.host, broker.port, message);
+            }
         }
         long sendElapsed = System.currentTimeMillis() - sendStartMillis;
         stats.subscriptionsSent = subscriptions.length;
 
         System.out.println("[" + subscriberId + "] sent " + subscriptions.length
-                + " subscriptions in " + sendElapsed + "ms, listening on port " + listenPort);
+                + " subscriptions (replicas=" + replicas + ") in " + sendElapsed
+                + "ms, listening on port " + listenPort);
 
         if (stopFile != null) {
             Args.waitForStopFile(stopFile, 250L);
@@ -123,6 +129,9 @@ public final class SubscriberMain {
 
     private static final class Stats {
 
+        final boolean dedup;
+        final ConcurrentHashMap<String, Boolean> seen;
+        final AtomicLong duplicatesSuppressed = new AtomicLong();
         long subscriptionsSent;
         final AtomicLong notificationsReceived = new AtomicLong();
         final LongAdder totalLatencyMs = new LongAdder();
@@ -130,13 +139,27 @@ public final class SubscriberMain {
         final AtomicLong maxLatencyMs = new AtomicLong(Long.MIN_VALUE);
         final long startMillis = System.currentTimeMillis();
 
+        Stats(boolean dedup) {
+            this.dedup = dedup;
+            this.seen = dedup ? new ConcurrentHashMap<>() : null;
+        }
+
         void recordNotification(String line) {
             try {
                 int firstPipe = line.indexOf('|');
                 int secondPipe = line.indexOf('|', firstPipe + 1);
                 int thirdPipe = line.indexOf('|', secondPipe + 1);
-                if (firstPipe < 0 || secondPipe < 0 || thirdPipe < 0) {
+                int fourthPipe = line.indexOf('|', thirdPipe + 1);
+                if (firstPipe < 0 || secondPipe < 0 || thirdPipe < 0 || fourthPipe < 0) {
                     return;
+                }
+                if (dedup) {
+                    String key = line.substring(firstPipe + 1, secondPipe)
+                            + "|" + line.substring(thirdPipe + 1, fourthPipe);
+                    if (seen.putIfAbsent(key, Boolean.TRUE) != null) {
+                        duplicatesSuppressed.incrementAndGet();
+                        return;
+                    }
                 }
                 long emitTimestamp = Long.parseLong(line.substring(secondPipe + 1, thirdPipe));
                 long latency = System.currentTimeMillis() - emitTimestamp;
@@ -159,6 +182,7 @@ public final class SubscriberMain {
             builder.append("subscriberId=").append(subscriberId).append('\n');
             builder.append("subscriptionsSent=").append(subscriptionsSent).append('\n');
             builder.append("notificationsReceived=").append(count).append('\n');
+            builder.append("duplicatesSuppressed=").append(duplicatesSuppressed.get()).append('\n');
             builder.append("averageLatencyMs=")
                     .append(String.format(Locale.US, "%.3f", averageLatency)).append('\n');
             builder.append("minLatencyMs=").append(minLatency).append('\n');

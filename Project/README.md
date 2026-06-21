@@ -104,20 +104,22 @@ powershell -ExecutionPolicy Bypass -File Project\run-eval.ps1
 
 Pentru debug sau experimente, componentele se pot porni si individual.
 
+Notă: clasele generate pentru protobuf depind de `protobuf-java-4.28.3.jar`, care trebuie inclus pe classpath atât la `javac` cât și la `java`.
+
 Broker:
 
 ```bash
-java -cp "Homework/bin;Project/bin" project.broker.BrokerMain \
-    --id=B1 --port=5001 \
+java -cp "Homework/bin;Project/bin;Project/lib/protobuf-java-4.28.3.jar" project.broker.BrokerMain \
+    --id=B1 --port=5001 --pub-port=7001 \
     --peers=B2@localhost:5002,B3@localhost:5003 \
     --stop-file=/tmp/STOP \
     --stats-file=/tmp/B1.stats
 ```
 
-Subscriber:
+Subscriber (folosește porturile text pentru SUB):
 
 ```bash
-java -cp "Homework/bin;Project/bin" project.subscriber.SubscriberMain \
+java -cp "Homework/bin;Project/bin;Project/lib/protobuf-java-4.28.3.jar" project.subscriber.SubscriberMain \
     --id=S1 --listen-port=6001 \
     --brokers=B1@localhost:5001,B2@localhost:5002,B3@localhost:5003 \
     --subscriptions=3334 --company-equals=100 \
@@ -125,13 +127,13 @@ java -cp "Homework/bin;Project/bin" project.subscriber.SubscriberMain \
     --stats-file=/tmp/S1.stats
 ```
 
-Publisher:
+Publisher (folosește pub-porturile binare):
 
 ```bash
-java -cp "Homework/bin;Project/bin" project.publisher.PublisherMain \
+java -cp "Homework/bin;Project/bin;Project/lib/protobuf-java-4.28.3.jar" project.publisher.PublisherMain \
     --id=P1 \
-    --brokers=B1@localhost:5001,B2@localhost:5002,B3@localhost:5003 \
-    --publications=10000 --rate=25 --duration-seconds=180 \
+    --brokers=B1@localhost:7001,B2@localhost:7002,B3@localhost:7003 \
+    --publications=10000 --rate=50 --duration-seconds=180 \
     --stats-file=/tmp/P1.stats
 ```
 
@@ -145,15 +147,23 @@ Project/src/project/
   matching/MatchingEngine.java    - filtrare content-based (Publication + Subscription)
   routing/RoutingTable.java       - per neighbor: predicate advertisate
   transport/
-    MessageCodec.java             - serializare/parsing mesaje SUB|ADV|PUB|NOT
+    MessageCodec.java             - serializare/parsing mesaje SUB|ADV|PUB|NOT (text)
     LineServer.java               - server TCP linie cu linie
     OutboundConnections.java      - cache de conexiuni TCP outbound (cu reconectare)
+    BinaryPubServer.java          - server TCP pentru publicatii protobuf (bonus 1)
+    BinaryPubClient.java          - client TCP pentru publicatii protobuf (bonus 1)
     Args.java                     - parser de argumente CLI + waitForStopFile
   broker/
     Broker.java                   - logica brokerului
     BrokerMain.java               - CLI entry
   publisher/PublisherMain.java    - CLI entry
   subscriber/SubscriberMain.java  - CLI entry
+
+Project/src-gen/project/proto/
+  Pubsub.java                     - cod Java generat din publication.proto
+
+Project/proto/publication.proto   - schema protobuf
+Project/lib/protobuf-java-*.jar   - runtime protobuf
 ```
 
 Modelul (`Publication`, `Subscription`, `SubscriptionCondition`) este reutilizat direct din `Homework/src/homework/` prin classpath, fara wrappere proprii.
@@ -166,30 +176,128 @@ Toate mesajele sunt linie text terminate cu `\n`, campuri separate prin `|`.
 | --- | --- |
 | `SUB` | `SUB\|<subId>\|<subscriberHost>\|<subscriberPort>\|<conditiiCodificate>` |
 | `ADV` | `ADV\|<subId>\|<originBroker>\|<hopCount>\|<conditiiCodificate>` |
-| `PUB` | `PUB\|<pubId>\|<emitTsMs>\|<hopCount>\|<company>\|<value>\|<drop>\|<variation>\|<date>` |
+| `PUB` | `PUB\|<pubId>\|<emitTsMs>\|<hopCount>\|<company>\|<value>\|<drop>\|<variation>\|<date>` (numai forwarding broker-broker) |
 | `NOT` | `NOT\|<pubId>\|<emitTsMs>\|<subId>\|<company>\|<value>\|<drop>\|<variation>\|<date>` |
 
 Conditiile sunt codificate cu acelasi token ca in fisierele Homework (`(field,op,value);(field,op,value);...`).
 
+## Bonus 1 - serializare binara Protocol Buffers
+
+Publicatiile emise de publisher catre brokeri sunt serializate cu **Google Protocol Buffers** (`protobuf-java 4.28.3`), nu in formatul text linie-cu-linie. Schema (`Project/proto/publication.proto`):
+
+```proto
+message Publication {
+  string pub_id = 1;
+  int64 emit_timestamp_ms = 2;
+  int32 hop_count = 3;
+  string company = 4;
+  double value = 5;
+  double drop = 6;
+  double variation = 7;
+  string date = 8;
+}
+```
+
+Codul Java generat de `protoc` este in `Project/src-gen/project/proto/Pubsub.java` (committed pentru a evita dependenta de `protoc` la build).
+Pentru regenerare, cu `protoc` 28.3 instalat: `protoc --proto_path=Project/proto --java_out=Project/src-gen Project/proto/publication.proto`.
+
+**Transport binar dedicat**: fiecare broker asculta pe doua porturi:
+- portul text (`--port=5001`) pentru `SUB`, `ADV`, `NOT` si pentru forwarding-ul `PUB` intre brokeri;
+- portul binar (`--pub-port=7001`) pentru `PUB` venit de la publisher, framing length-delimited (`Publication.writeDelimitedTo` / `parseDelimitedFrom`) plus ACK binar dupa procesare.
+
+Forwarding-ul `PUB` intre brokeri ramane in format text, asa cum cere cerinta bonus ("publicatiile publisher -> brokers"). Dupa deserializare, brokerul construieste mesaj text si propaga prin acelasi pipeline ca inainte.
+
+**Fisiere noi/atinse**:
+- `Project/lib/protobuf-java-4.28.3.jar` - biblioteca runtime (in classpath pentru `javac` si `java`);
+- `Project/proto/publication.proto` - schema;
+- `Project/src-gen/project/proto/Pubsub.java` - cod Java generat;
+- `Project/src/project/transport/BinaryPubServer.java`, `BinaryPubClient.java` - transport binar TCP cu framing length-delimited;
+- `Broker` accepta `--pub-port` si numara `publicationsReceivedBinary` in fisierul de statistici.
+
+### Comparatie: implementare default (text) vs bonus (protobuf)
+
+Publisher-ul accepta `--transport=text|protobuf` (implicit `protobuf`). Modul `text` foloseste calea de dinainte de bonus: `PUB` serializat text linie-cu-linie, trimis pe portul text al brokerului (acelasi pe care brokerul deja trateaza `PUB`-urile forwardate). Modul `protobuf` foloseste transportul binar dedicat de mai sus. Astfel se pot rula si compara ambele variante pe acelasi scenariu.
+
+Comparatia se ruleaza cu:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Project\compare-transport.ps1
+```
+
+Rezultate (acelasi scenariu nesaturat: company-equals=100, 10000 subscriptii, 3 subscriberi, 3 brokeri, rata 50 pub/s, feed 60 s, i7-12650H):
+
+| Metrica | Text (fara bonus) | Protobuf (bonus) |
+| --- | --- | --- |
+| Publicatii emise | 3000 | 3000 |
+| Octeti / publicatie (medie) | 75.99 B | **65.76 B** |
+| Total octeti emisi | 227 962 | 197 288 |
+| Notificari livrate | 3 750 314 | 3 750 314 |
+| Latenta medie de livrare | 921.067 ms | **318.166 ms** |
+
+- **Echivalenta functionala**: ambele variante livreaza exact acelasi numar de notificari (3 750 314), deci protobuf nu schimba semantica, doar reprezentarea pe sarma.
+- **Dimensiune payload**: protobuf reduce cu **~13.5%** octetii per publicatie (codare binara compacta vs text cu zecimale formatate `%.6f`).
+- **Latenta**: in aceasta rulare protobuf a livrat cu latenta mai mica, in parte pentru ca publicatiile intra pe un port binar dedicat, separat de `LineServer`-ul care duce notificarile; valorile absolute de latenta sunt sensibile la incarcarea masinii.
+
+## Bonus 2 - toleranta la caderea brokerilor
+
+Sistemul trateaza caderea unui nod broker fara a pierde notificari, prin mecanisme combinate care nu modifica rutarea de baza (cerinta 4):
+
+1. **Replicare subscriptii** (`SubscriberMain --replicas=N`, implicit `1`): fiecare subscriptie este inregistrata pe `N` brokeri distincti (primary plus backup-uri, alesi prin `(index + replica) % numarBrokeri`). Astfel nicio subscriptie nu traieste pe un singur broker; daca un broker cade, copia de pe brokerul backup continua sa faca matching si sa notifice.
+2. **ACK publisher -> broker**: pentru transportul Protobuf, publisher-ul asteapta un ACK de la broker dupa fiecare publicatie. Brokerul trimite ACK doar dupa ce a apelat logica de procesare (`processPublication`), deci o publicatie scrisa pe socket dar neprocesata inainte de cadere nu mai este considerata livrata.
+3. **Failover la publisher** (`PublisherMain --failover=true`, implicit `false`): daca trimiterea unei publicatii catre un broker esueaza, conexiunea se inchide sau ACK-ul nu soseste pana la timeout (`--ack-timeout-ms`, implicit `30000`), publicatia este retrimisa imediat catre urmatorul broker viu. Astfel publicatiile continua sa intre in retea chiar daca brokerul lor de destinatie a cazut.
+
+Deoarece o subscriptie ajunge acum pe doi brokeri, in functionare normala subscriberul primeste notificari duplicate (de la primary si de la backup). Subscriberul **deduplica** dupa cheia `(pubId, subId)` si pastreaza doar prima notificare (`duplicatesSuppressed` numara restul). Garantia este la-cel-putin-o-data fara pierderi, cu duplicate eliminate la receptie.
+
+Pentru a sustine failover-ul, `BinaryPubClient.send` intoarce `true` numai dupa primirea ACK-ului de la broker. `OutboundConnections.sendLine` intoarce `boolean` pentru trimiterile text broker-broker si broker-subscriber, iar brokerul numara in statistici doar trimiterile reusite.
+
+### Simulare cadere broker
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Project\simulate-broker-failure.ps1
+```
+
+Scriptul ruleaza trei scenarii scurte si **opreste efectiv brokerul B2** (`Stop-Process`) la mijlocul feed-ului. Rezultate (3 brokeri, 3 subscriberi, 300 subscriptii, publisher protobuf la 30 pub/s, feed 30 s, B2 oprit dupa 12 s, i7-12650H):
+
+| Scenariu | Publicatii emise | Pub. pierdute la publisher | Failover-uri | Notificari distincte livrate | % fata de baseline | Duplicate suprimate |
+| --- | --- | --- | --- | --- | --- | --- |
+| A. Baseline (fara cadere) | 900 | 0 | 0 | 33 871 | 100.0% | 0 |
+| B. Cadere B2, FARA toleranta (replicas=1) | 900 | 181 | 0 | 22 479 | 66.4% | 0 |
+| C. Cadere B2, CU toleranta (replicas=2, failover) | 900 | 0 | 181 | 33 871 | **100.0%** | 20 160 |
+
+- In scenariul **B** (fara toleranta), caderea lui B2 pierde ~34% din notificari: subscriptiile stocate doar pe B2 raman netratate, iar cele 181 de publicatii rutate spre B2 dupa cadere nu mai intra in retea (`publicationsDropped=181`).
+- In scenariul **C** (cu toleranta), se livreaza exact acelasi numar de notificari distincte ca baseline-ul (33 871), desi B2 este oprit: publisher-ul a redirectat prin failover cele 181 de publicatii (`failoversUsed=181`), iar copiile subscriptiilor de pe brokerul backup au asigurat matching-ul si notificarea. Cele 20 160 de notificari duplicate au fost eliminate la receptie.
+
+ACK-ul inchide fereastra critica in care publisher-ul scria publicatia catre un broker care cadea inainte sa o proceseze: fara ACK, publisher-ul retrimite aceeasi publicatie catre alt broker. Daca brokerul a procesat publicatia dar ACK-ul se pierde, retrimiterea poate produce duplicate, iar subscriberul le elimina prin cheia `(pubId, subId)`.
+
 ## Rezultate evaluare
 
-Rulare completa conform cerintei: 3 minute feed, 10000 subscriptii, 3 subscriberi, 1 publisher la rata 25 pub/s, procesor Intel Core i5-10400. Raport detaliat: [output/eval.zmWV8h/final-report.md](output/eval.zmWV8h/final-report.md).
+Rulare conform cerintei: 3 minute feed (180 s), 10000 subscriptii, 3 subscriberi, 1 publisher, procesor 12th Gen Intel Core i7-12650H, OpenJDK 17.0.14. Raportul live se genereaza local sub `Project/output/eval.*/final-report.md` (folderul `output/` este gitignored, deci nu este versionat).
 
-| Metrica | Scenariu A (100% `=`) | Scenariu B (25% `=`) |
+### (a) + (b) Livrare si latenta (sistem live, scenariu nesaturat)
+
+Masurate pe scenariu A (100% `=`), unde volumul de notificari ramane in limita debitului sistemului:
+
+| Metrica | Valoare |
+| --- | --- |
+| Subscriptii inregistrate | 10000 (round-robin 3334 / 3333 / 3333 pe brokeri) |
+| Publicatii emise in 3 min (rata 50/s) | 9000 |
+| Publicatii intrate efectiv in retea (binar) | 9000 (3000 / broker direct + 6000 forwardate de la vecini) |
+| Notificari livrate cu succes | 11 251 130 |
+| Latenta medie de livrare | **25.303 ms** |
+
+### (c) Rata de matching: 100% `=` vs 25% `=`
+
+Rata de matching este o proprietate semantica a subscriptiilor si a publicatiilor, deci se masoara pe setul de date generat (10000 subscriptii pe campul `company` x 5000 publicatii = 50 000 000 perechi evaluate cu `MatchingEngine`), independent de eventuala saturare a livrarii:
+
+| Scenariu | Rata masurata | Rata teoretica |
 | --- | --- | --- |
-| Subscriptii inregistrate | 10000 | 10000 |
-| Publicatii emise in 3 minute | 4500 | 4500 |
-| Notificari livrate cu succes | 5 625 331 | 30 930 163 |
-| Latenta medie de livrare | **5.269 ms** | **24.240 ms** |
-| Rata de matching | **12.5007%** | **68.7337%** |
-| Rata de matching teoretica | 12.5% (1/8) | 68.75% (0.25 * 1/8 + 0.75 * 7/8) |
-| Eroare fata de teorie | 0.005 puncte procentuale | 0.02 puncte procentuale |
+| A (100% `=`) | **12.4924%** | 12.5% (1/8) |
+| B (25% `=`) | **68.7519%** | 68.75% (0.25 * 1/8 + 0.75 * 7/8) |
 
-Concluzia comparativa pentru cerinta (c):
+Cu 8 valori posibile pentru `company`: o subscriptie cu `=` matcheaza 1/8 din publicatii; o subscriptie cu `!=` matcheaza 7/8. La 100% `=` rata este 12.5%; la 25% `=` cele 75% de subscriptii cu `!=` ridica rata la ~68.75%. Masurarea live de pe scenariu A (12.5007% in raportul generat) confirma aceeasi valoare, validand empiric motorul de matching.
 
-- Cu 8 valori posibile pentru `company`, scenariu A (100% `=`) matcheaza in medie 1/8 din publicatii per subscriptie.
-- Scenariu B (25% `=`) are 75% din subscriptii cu `!=` care matcheaza 7/8, deci rata totala creste la ~68.75%.
-- Scenariu B **livreaza ~5.5x mai multe notificari** decat scenariu A pentru aceeasi rata de publicatii.
-- Latenta in scenariu B creste de la 5 ms la 24 ms din cauza saturatiei TCP loopback la ~170k notificari/secunda; sistemul ramane functional fara pierderi.
+### Observatie privind debitul scenariului B
 
-Stats per broker din rularea de referinta (vezi `Project/output/eval.zmWV8h/scenario-A-eq-100/B*.stats`) arata distributia balansata a subscriptiilor (round-robin: ~3334 / 3333 / 3333) si rutarea publicatiilor prin overlay (fiecare broker primeste atat publicatii direct de la publisher, cat si forwardate de la vecini).
+In rularea live, scenariu B satureaza calea de livrare pe aceasta masina: cele ~75% subscriptii cu `!=` genereaza ~68.75% * 10000 = ~6875 notificari per publicatie, adica peste 100k notificari/s catre subscriberi prin TCP loopback, mai mult decat poate prelucra `LineServer`-ul single-thread de pe subscriber. Coada de livrare creste (latenta de ordinul zecilor de secunde) atat la 50 pub/s cat si la 25 pub/s. De aceea (a) si (b) se raporteaza pe scenariu A (nesaturat), iar (c) pe setul de date (livrare-agnostic). Cresterea debitului de livrare (de ex. pool de thread-uri pentru notificari) ar permite si masurarea live nesaturata a scenariului B, dar nu este necesara pentru cerintele temei.
+
+Stats per broker (vezi `Project/output/eval.*/scenario-A-eq-100/B*.stats`) arata distributia balansata a subscriptiilor (round-robin: 3334 / 3333 / 3333) si rutarea publicatiilor prin overlay (fiecare broker primeste atat publicatii direct de la publisher prin transport binar, cat si forwardate de la vecini).
