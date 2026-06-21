@@ -34,6 +34,8 @@ public final class PublisherMain {
         int threads = Integer.parseInt(options.getOrDefault("threads", "1"));
         String transport = options.getOrDefault("transport", "protobuf");
         boolean useProtobuf = !transport.equalsIgnoreCase("text");
+        boolean failover = Boolean.parseBoolean(options.getOrDefault("failover", "false"));
+        int ackTimeoutMs = Integer.parseInt(options.getOrDefault("ack-timeout-ms", "30000"));
         String pubIdPrefix = options.getOrDefault("pub-id-prefix", publisherId);
         Path stopFile = options.containsKey("stop-file") ? Path.of(options.get("stop-file")) : null;
         Path statsFile = options.containsKey("stats-file") ? Path.of(options.get("stats-file")) : null;
@@ -46,17 +48,20 @@ public final class PublisherMain {
         DatasetGenerator generator = new DatasetGenerator(config);
         Publication[] publications = generator.generatePublications(threads);
 
-        BinaryPubClient binaryOutbound = useProtobuf ? new BinaryPubClient() : null;
+        BinaryPubClient binaryOutbound = useProtobuf ? new BinaryPubClient(ackTimeoutMs) : null;
         OutboundConnections textOutbound = useProtobuf ? null : new OutboundConnections();
 
         System.out.println("[" + publisherId + "] generated " + publications.length
                 + " publications, emitting at " + rate + "/s for up to " + durationSeconds + "s"
-                + " (" + (useProtobuf ? "protobuf binary" : "text") + " serialization)");
+                + " (" + (useProtobuf ? "protobuf binary with broker ACK" : "text")
+                + " serialization)");
 
         long startMillis = System.currentTimeMillis();
         long endMillis = startMillis + durationSeconds * 1000L;
         long publicationsSent = 0L;
         long bytesSent = 0L;
+        long failoversUsed = 0L;
+        long publicationsDropped = 0L;
 
         while (System.currentTimeMillis() < endMillis) {
             if (stopFile != null && Files.exists(stopFile)) {
@@ -66,10 +71,14 @@ public final class PublisherMain {
             Publication publication = publications[(int) (publicationsSent % publications.length)];
             long emitTimestamp = System.currentTimeMillis();
             String publicationId = pubIdPrefix + "-" + (publicationsSent + 1L);
-            Endpoint broker = brokers.get((int) (publicationsSent % brokers.size()));
+            int startIndex = (int) (publicationsSent % brokers.size());
+            int attempts = failover ? brokers.size() : 1;
 
+            Pubsub.Publication message = null;
+            String line = null;
+            int payloadBytes;
             if (useProtobuf) {
-                Pubsub.Publication message = Pubsub.Publication.newBuilder()
+                message = Pubsub.Publication.newBuilder()
                         .setPubId(publicationId)
                         .setEmitTimestampMs(emitTimestamp)
                         .setHopCount(1)
@@ -80,12 +89,29 @@ public final class PublisherMain {
                         .setDate(publication.getDate())
                         .build();
                 int serializedSize = message.getSerializedSize();
-                bytesSent += serializedSize + CodedOutputStream.computeUInt32SizeNoTag(serializedSize);
-                binaryOutbound.send(broker.host, broker.port, message);
+                payloadBytes = serializedSize + CodedOutputStream.computeUInt32SizeNoTag(serializedSize);
             } else {
-                String line = MessageCodec.buildPublication(publicationId, emitTimestamp, 1, publication);
-                bytesSent += line.getBytes(StandardCharsets.UTF_8).length + 1;
-                textOutbound.sendLine(broker.host, broker.port, line);
+                line = MessageCodec.buildPublication(publicationId, emitTimestamp, 1, publication);
+                payloadBytes = line.getBytes(StandardCharsets.UTF_8).length + 1;
+            }
+
+            boolean delivered = false;
+            for (int attempt = 0; attempt < attempts && !delivered; attempt++) {
+                Endpoint target = brokers.get((startIndex + attempt) % brokers.size());
+                if (useProtobuf) {
+                    delivered = binaryOutbound.send(target.host, target.port, message);
+                } else {
+                    delivered = textOutbound.sendLine(target.host, target.port, line);
+                }
+                if (delivered) {
+                    bytesSent += payloadBytes;
+                    if (attempt > 0) {
+                        failoversUsed++;
+                    }
+                }
+            }
+            if (!delivered) {
+                publicationsDropped++;
             }
             publicationsSent++;
 
@@ -108,6 +134,10 @@ public final class PublisherMain {
         statsBuilder.append("publisherId=").append(publisherId).append('\n');
         statsBuilder.append("transport=").append(useProtobuf ? "protobuf" : "text").append('\n');
         statsBuilder.append("publicationsSent=").append(publicationsSent).append('\n');
+        statsBuilder.append("failover=").append(failover).append('\n');
+        statsBuilder.append("ackTimeoutMs=").append(useProtobuf ? ackTimeoutMs : 0).append('\n');
+        statsBuilder.append("failoversUsed=").append(failoversUsed).append('\n');
+        statsBuilder.append("publicationsDropped=").append(publicationsDropped).append('\n');
         statsBuilder.append("bytesSent=").append(bytesSent).append('\n');
         double avgBytes = publicationsSent > 0 ? (bytesSent * 1.0 / publicationsSent) : 0.0;
         statsBuilder.append("avgBytesPerPublication=")

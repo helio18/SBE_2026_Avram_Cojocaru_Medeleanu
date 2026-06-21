@@ -203,7 +203,7 @@ Pentru regenerare, cu `protoc` 28.3 instalat: `protoc --proto_path=Project/proto
 
 **Transport binar dedicat**: fiecare broker asculta pe doua porturi:
 - portul text (`--port=5001`) pentru `SUB`, `ADV`, `NOT` si pentru forwarding-ul `PUB` intre brokeri;
-- portul binar (`--pub-port=7001`) pentru `PUB` venit de la publisher, framing length-delimited (`Publication.writeDelimitedTo` / `parseDelimitedFrom`).
+- portul binar (`--pub-port=7001`) pentru `PUB` venit de la publisher, framing length-delimited (`Publication.writeDelimitedTo` / `parseDelimitedFrom`) plus ACK binar dupa procesare.
 
 Forwarding-ul `PUB` intre brokeri ramane in format text, asa cum cere cerinta bonus ("publicatiile publisher -> brokers"). Dupa deserializare, brokerul construieste mesaj text si propaga prin acelasi pipeline ca inainte.
 
@@ -237,6 +237,37 @@ Rezultate (acelasi scenariu nesaturat: company-equals=100, 10000 subscriptii, 3 
 - **Echivalenta functionala**: ambele variante livreaza exact acelasi numar de notificari (3 750 314), deci protobuf nu schimba semantica, doar reprezentarea pe sarma.
 - **Dimensiune payload**: protobuf reduce cu **~13.5%** octetii per publicatie (codare binara compacta vs text cu zecimale formatate `%.6f`).
 - **Latenta**: in aceasta rulare protobuf a livrat cu latenta mai mica, in parte pentru ca publicatiile intra pe un port binar dedicat, separat de `LineServer`-ul care duce notificarile; valorile absolute de latenta sunt sensibile la incarcarea masinii.
+
+## Bonus 2 - toleranta la caderea brokerilor
+
+Sistemul trateaza caderea unui nod broker fara a pierde notificari, prin mecanisme combinate care nu modifica rutarea de baza (cerinta 4):
+
+1. **Replicare subscriptii** (`SubscriberMain --replicas=N`, implicit `1`): fiecare subscriptie este inregistrata pe `N` brokeri distincti (primary plus backup-uri, alesi prin `(index + replica) % numarBrokeri`). Astfel nicio subscriptie nu traieste pe un singur broker; daca un broker cade, copia de pe brokerul backup continua sa faca matching si sa notifice.
+2. **ACK publisher -> broker**: pentru transportul Protobuf, publisher-ul asteapta un ACK de la broker dupa fiecare publicatie. Brokerul trimite ACK doar dupa ce a apelat logica de procesare (`processPublication`), deci o publicatie scrisa pe socket dar neprocesata inainte de cadere nu mai este considerata livrata.
+3. **Failover la publisher** (`PublisherMain --failover=true`, implicit `false`): daca trimiterea unei publicatii catre un broker esueaza, conexiunea se inchide sau ACK-ul nu soseste pana la timeout (`--ack-timeout-ms`, implicit `30000`), publicatia este retrimisa imediat catre urmatorul broker viu. Astfel publicatiile continua sa intre in retea chiar daca brokerul lor de destinatie a cazut.
+
+Deoarece o subscriptie ajunge acum pe doi brokeri, in functionare normala subscriberul primeste notificari duplicate (de la primary si de la backup). Subscriberul **deduplica** dupa cheia `(pubId, subId)` si pastreaza doar prima notificare (`duplicatesSuppressed` numara restul). Garantia este la-cel-putin-o-data fara pierderi, cu duplicate eliminate la receptie.
+
+Pentru a sustine failover-ul, `BinaryPubClient.send` intoarce `true` numai dupa primirea ACK-ului de la broker. `OutboundConnections.sendLine` intoarce `boolean` pentru trimiterile text broker-broker si broker-subscriber, iar brokerul numara in statistici doar trimiterile reusite.
+
+### Simulare cadere broker
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Project\simulate-broker-failure.ps1
+```
+
+Scriptul ruleaza trei scenarii scurte si **opreste efectiv brokerul B2** (`Stop-Process`) la mijlocul feed-ului. Rezultate (3 brokeri, 3 subscriberi, 300 subscriptii, publisher protobuf la 30 pub/s, feed 30 s, B2 oprit dupa 12 s, i7-12650H):
+
+| Scenariu | Publicatii emise | Pub. pierdute la publisher | Failover-uri | Notificari distincte livrate | % fata de baseline | Duplicate suprimate |
+| --- | --- | --- | --- | --- | --- | --- |
+| A. Baseline (fara cadere) | 900 | 0 | 0 | 33 871 | 100.0% | 0 |
+| B. Cadere B2, FARA toleranta (replicas=1) | 900 | 181 | 0 | 22 479 | 66.4% | 0 |
+| C. Cadere B2, CU toleranta (replicas=2, failover) | 900 | 0 | 181 | 33 871 | **100.0%** | 20 160 |
+
+- In scenariul **B** (fara toleranta), caderea lui B2 pierde ~34% din notificari: subscriptiile stocate doar pe B2 raman netratate, iar cele 181 de publicatii rutate spre B2 dupa cadere nu mai intra in retea (`publicationsDropped=181`).
+- In scenariul **C** (cu toleranta), se livreaza exact acelasi numar de notificari distincte ca baseline-ul (33 871), desi B2 este oprit: publisher-ul a redirectat prin failover cele 181 de publicatii (`failoversUsed=181`), iar copiile subscriptiilor de pe brokerul backup au asigurat matching-ul si notificarea. Cele 20 160 de notificari duplicate au fost eliminate la receptie.
+
+ACK-ul inchide fereastra critica in care publisher-ul scria publicatia catre un broker care cadea inainte sa o proceseze: fara ACK, publisher-ul retrimite aceeasi publicatie catre alt broker. Daca brokerul a procesat publicatia dar ACK-ul se pierde, retrimiterea poate produce duplicate, iar subscriberul le elimina prin cheia `(pubId, subId)`.
 
 ## Rezultate evaluare
 

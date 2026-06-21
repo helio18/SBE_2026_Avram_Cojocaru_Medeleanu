@@ -11,9 +11,9 @@ public final class OutboundConnections {
 
     private final ConcurrentHashMap<String, Sender> senders = new ConcurrentHashMap<>();
 
-    public void sendLine(String host, int port, String line) {
+    public boolean sendLine(String host, int port, String line) {
         Sender sender = senders.computeIfAbsent(host + ":" + port, key -> new Sender(host, port));
-        sender.send(line);
+        return sender.send(line);
     }
 
     public void closeAll() {
@@ -35,30 +35,33 @@ public final class OutboundConnections {
             this.port = port;
         }
 
-        void send(String line) {
+        boolean send(String line) {
             synchronized (lock) {
                 if (writer == null) {
                     if (!tryOpen()) {
-                        return;
+                        return false;
                     }
                 }
                 try {
                     writer.write(line);
                     writer.write('\n');
                     writer.flush();
+                    return true;
                 } catch (IOException firstFailure) {
                     closeQuietly();
                     if (!tryOpen()) {
-                        return;
+                        return false;
                     }
                     try {
                         writer.write(line);
                         writer.write('\n');
                         writer.flush();
+                        return true;
                     } catch (IOException secondFailure) {
                         System.err.println("[outbound] failed to send to " + host + ":" + port
                                 + ": " + secondFailure.getMessage());
                         closeQuietly();
+                        return false;
                     }
                 }
             }

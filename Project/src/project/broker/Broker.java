@@ -177,8 +177,9 @@ public final class Broker {
             if (MatchingEngine.matches(publication, record.subscription)) {
                 String notification = MessageCodec.buildNotification(
                         publicationId, emitTimestamp, entry.getKey(), publication);
-                outbound.sendLine(record.subscriberHost, record.subscriberPort, notification);
-                notificationsSent.incrementAndGet();
+                if (outbound.sendLine(record.subscriberHost, record.subscriberPort, notification)) {
+                    notificationsSent.incrementAndGet();
+                }
                 matchedLocally = true;
             }
         }
@@ -197,8 +198,9 @@ public final class Broker {
                     if (peer == null) {
                         continue;
                     }
-                    outbound.sendLine(peer.host, peer.port, forwarded);
-                    publicationsForwarded.incrementAndGet();
+                    if (outbound.sendLine(peer.host, peer.port, forwarded)) {
+                        publicationsForwarded.incrementAndGet();
+                    }
                 }
             }
         }

@@ -3,13 +3,17 @@ package project.transport;
 import project.proto.Pubsub;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.function.Consumer;
 
 public final class BinaryPubServer {
+
+    private static final int ACK = 0x06;
 
     private final int port;
     private final Consumer<Pubsub.Publication> messageHandler;
@@ -57,13 +61,16 @@ public final class BinaryPubServer {
     }
 
     private void handleClient(Socket socket) {
-        try (InputStream input = new BufferedInputStream(socket.getInputStream())) {
+        try (InputStream input = new BufferedInputStream(socket.getInputStream());
+                OutputStream output = new BufferedOutputStream(socket.getOutputStream())) {
             while (true) {
                 Pubsub.Publication message = Pubsub.Publication.parseDelimitedFrom(input);
                 if (message == null) {
                     break;
                 }
                 messageHandler.accept(message);
+                output.write(ACK);
+                output.flush();
             }
         } catch (IOException ignored) {
         } finally {
