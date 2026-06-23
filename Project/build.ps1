@@ -1,6 +1,18 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+if (-not (Get-Command javac -ErrorAction SilentlyContinue)) {
+    if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\javac.exe"))) {
+        $env:Path = "$env:Path;$(Join-Path $env:JAVA_HOME 'bin')"
+    } else {
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+            [System.Environment]::GetEnvironmentVariable("Path", "User")
+    }
+}
+if (-not (Get-Command javac -ErrorAction SilentlyContinue)) {
+    throw "javac not found. Install a JDK or set JAVA_HOME, then retry."
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 $homeworkDir = Join-Path $repoRoot "Homework"
